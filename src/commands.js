@@ -1,4 +1,4 @@
-mport { InlineKeyboard } from "grammy"
+import { InlineKeyboard } from "grammy"
 
 // Настройки проекта
 const ADMIN_ID = 8207612971
