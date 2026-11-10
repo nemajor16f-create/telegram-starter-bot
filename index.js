@@ -28,14 +28,11 @@ bot.catch((err) => {
 })
 
 function explain(err) {
-  const code = err?.error_code ?? err?.response?.error_code
-  if (code === 401) {
-    console.error("Telegram rejected the token (401 Unauthorized). Copy it again from @BotFather; a revoked token stops working at once.")
-  } else if (code === 404) {
-    console.error("Telegram answered 404: the token is not a bot token. It looks like 123456789:AAF... and comes from @BotFather.")
-  } else {
-    console.error("[bot] could not reach Telegram:", err?.message ?? err)
-  }
+  console.error("[bot] FULL ERROR:", err)
+  console.error("[bot] CAUSE:", err?.cause)
+  console.error("[bot] CAUSE CODE:", err?.cause?.code)
+  console.error("[bot] CAUSE MESSAGE:", err?.cause?.message)
+  console.error("[bot] RESPONSE:", err?.response)
 }
 
 async function main() {
