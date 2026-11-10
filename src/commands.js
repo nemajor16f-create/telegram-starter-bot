@@ -55,13 +55,16 @@ ${REFERRAL_URL}
     await ctx.reply("Используй /start для главного меню.")
   })
 
-  bot.command("chatid", async (ctx) => {
-    if (ctx.from?.id !== ADMIN_ID) return
+ bot.command("chatid", async (ctx) => {
+  await ctx.reply(`Твой Telegram ID: ${ctx.from.id}`)
 
-    await ctx.reply(
-      "Перешли мне сообщение из нужного канала. Я попробую определить его ID."
-    )
-  })
+  if (ctx.from?.id !== ADMIN_ID) {
+    await ctx.reply("Этот аккаунт не распознан как администратор.")
+    return
+  }
+
+  await ctx.reply("Перешли мне сообщение из нужного канала.")
+})
 
   bot.on("message", async (ctx) => {
     if (ctx.from?.id !== ADMIN_ID) return
