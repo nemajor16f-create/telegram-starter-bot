@@ -21,6 +21,11 @@ if (!token) {
 const mode = (process.env.TELEGRAM_MODE || "polling").trim().toLowerCase()
 const bot = new Bot(token)
 
+bot.use(async (ctx, next) => {
+  console.log("[GOLD TRADE] Получено обновление:", Object.keys(ctx.update))
+  await next()
+})
+
 registerCommands(bot)
 
 bot.catch((err) => {
