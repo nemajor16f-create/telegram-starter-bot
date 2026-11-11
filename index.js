@@ -93,6 +93,36 @@ async function main() {
   // Polling: make sure no webhook is left over from an earlier webhook run.
   await bot.api.deleteWebhook().catch(() => {})
 
+  // Pocket Option Postback HTTP server
+  const port = Number(process.env.PORT || 8080)
+
+  http.createServer(async (req, res) => {
+    try {
+      const handled = await handlePocketOptionPostback(req, res)
+      if (handled) return
+
+      if (req.method === "GET" && req.url === "/") {
+        res.writeHead(200, {
+          "content-type": "text/plain; charset=utf-8",
+        })
+        res.end("GOLD TRADE BOT is running")
+        return
+      }
+
+      res.writeHead(404)
+      res.end("Not found")
+    } catch (error) {
+      console.error("[HTTP ERROR]", error)
+      if (!res.headersSent) {
+        res.writeHead(500)
+        res.end("Internal server error")
+      }
+    }
+  }).listen(port, () => {
+    console.log(`[HTTP] Postback server listening on port ${port}`)
+  })
+
+
   // Telegram gives a bot's updates to one poller at a time. When the same
   // token is already running somewhere else (your own computer, another
   // host, a second copy of this app), Telegram answers 409 and this copy
