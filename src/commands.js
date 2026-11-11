@@ -148,6 +148,12 @@ ${statuses[application.status] || "Статус неизвестен."}`
   bot.command("chatid", async (ctx) => {
     await ctx.reply(`Твой Telegram ID: ${ctx.from.id}`)
   })
+  
+  bot.command("groupid", async (ctx) => {
+await ctx.reply(
+Название группы: ${ctx.chat.title || "Без названия"}\nID группы: ${ctx.chat.id}
+)
+})
 
   // Приём Pocket Option ID от пользователей
   bot.on("message:text", async (ctx) => {
