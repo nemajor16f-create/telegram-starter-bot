@@ -8,10 +8,13 @@ const REFERRAL_URL = "https://po-ru4.click/smart/bvdTV2aDJ48lYW"
 const VIP_CHANNEL_ID = "-1004332935139"
 const ACADEMY_CHANNEL_ID = "-1003726976169"
 
+// Временно. После получения ID группы заменим это значение.
+const CHAT_GROUP_ID = "ВСТАВИТЬ_ID_ГРУППЫ"
+
 const STORAGE_DIR = "/data/storage"
 const STORAGE_FILE = `${STORAGE_DIR}/applications.json`
 
-const BOT_VERSION = "GOLD TRADE ACCESS v3.0"
+const BOT_VERSION = "GOLD TRADE ACCESS v3.1"
 
 await mkdir(STORAGE_DIR, { recursive: true })
 
@@ -29,12 +32,14 @@ async function loadApplications() {
 let saveQueue = Promise.resolve()
 
 function saveApplications(data) {
-  saveQueue = saveQueue.then(async () => {
+  const operation = saveQueue.catch(() => {}).then(async () => {
     const tempFile = `${STORAGE_FILE}.tmp`
     await writeFile(tempFile, JSON.stringify(data, null, 2))
     await rename(tempFile, STORAGE_FILE)
   })
-  return saveQueue
+
+  saveQueue = operation
+  return operation
 }
 
 function mainMenu() {
@@ -63,7 +68,7 @@ ${REFERRAL_URL}
 
 Торговать для получения доступа не обязательно.
 
-Ссылка может быть партнёрской.
+Регистрация осуществляется по партнёрской ссылке проекта.
 
 ⚠️ Бинарные опционы связаны с высоким риском. Можно потерять весь депозит. Прибыль не гарантируется.`
   )
@@ -134,28 +139,29 @@ ${statuses[application.status] || "Статус неизвестен."}`
 
   bot.command("help", async (ctx) => {
     await ctx.reply(
-      `❓ ПОМОЩЬ
-
-/start — главное меню
+      `/start — главное меню
 /join — вступление
 /about — о проекте
 /status — статус заявки
 /chatid — твой Telegram ID
+/groupid — ID группы
 /version — версия бота`
     )
   })
 
   bot.command("chatid", async (ctx) => {
-    await ctx.reply(`Твой Telegram ID: ${ctx.from.id}`)
+    await ctx.reply("Твой Telegram ID: " + ctx.from.id)
   })
-  
-  bot.command("groupid", async (ctx) => {
-await ctx.reply(
-Название группы: ${ctx.chat.title || "Без названия"}\nID группы: ${ctx.chat.id}
-)
-})
 
-  // Приём Pocket Option ID от пользователей
+  // Получение ID группы
+  bot.command("groupid", async (ctx) => {
+    await ctx.reply(
+      "Название группы: " + (ctx.chat.title || "Без названия") +
+      "\nID группы: " + ctx.chat.id
+    )
+  })
+
+  // Приём Pocket Option ID
   bot.on("message:text", async (ctx) => {
     const text = ctx.message.text.trim()
 
@@ -234,31 +240,41 @@ await ctx.reply(
       })
     }
 
+    if (CHAT_GROUP_ID === "ВСТАВИТЬ_ID_ГРУППЫ") {
+      return ctx.answerCallbackQuery({
+        text: "Сначала настрой ID CHAT GOLD TRADE.",
+        show_alert: true
+      })
+    }
+
     try {
       const expireDate = Math.floor(Date.now() / 1000) + 86400
 
+      const inviteOptions = {
+        member_limit: 1,
+        expire_date: expireDate
+      }
+
       const vipInvite = await ctx.api.createChatInviteLink(
         VIP_CHANNEL_ID,
-        {
-          member_limit: 1,
-          expire_date: expireDate,
-          name: "GOLD TRADE VIP"
-        }
+        { ...inviteOptions, name: "GOLD TRADE VIP" }
       )
 
       const academyInvite = await ctx.api.createChatInviteLink(
         ACADEMY_CHANNEL_ID,
-        {
-          member_limit: 1,
-          expire_date: expireDate,
-          name: "GOLD TRADE ACADEMY"
-        }
+        { ...inviteOptions, name: "GOLD TRADE ACADEMY" }
+      )
+
+      const chatInvite = await ctx.api.createChatInviteLink(
+        CHAT_GROUP_ID,
+        { ...inviteOptions, name: "GOLD TRADE CHAT" }
       )
 
       application.status = "approved"
       application.approvedAt = new Date().toISOString()
       application.vipInvite = vipInvite.invite_link
       application.academyInvite = academyInvite.invite_link
+      application.chatInvite = chatInvite.invite_link
 
       await saveApplications(applications)
 
@@ -270,6 +286,9 @@ await ctx.reply(
 
 👑 VIP GOLD TRADE:
 ${vipInvite.invite_link}
+
+💬 CHAT GOLD TRADE:
+${chatInvite.invite_link}
 
 🎓 ACADEMY GOLD TRADE:
 ${academyInvite.invite_link}
@@ -351,7 +370,9 @@ Pocket Option ID: ${application.poId}`
 
   bot.callbackQuery("about", async (ctx) => {
     await ctx.answerCallbackQuery()
-    await ctx.reply("GOLD TRADE | VIP GOLD TRADE | CHAT GOLD TRADE | ACADEMY GOLD TRADE")
+    await ctx.reply(
+      "GOLD TRADE | VIP GOLD TRADE | CHAT GOLD TRADE | ACADEMY GOLD TRADE"
+    )
   })
 
   bot.callbackQuery("status", async (ctx) => {
