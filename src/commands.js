@@ -1,4 +1,3 @@
-
 import { InlineKeyboard } from "grammy"
 import {
   mkdir,
@@ -6,1024 +5,757 @@ import {
   writeFile,
   rename,
 } from "node:fs/promises"
+import path from "node:path"
 
-// ==========================================
+// ======================================================
 // GOLD TRADE ACCESS v6.0
-// ==========================================
+// Node.js 20+ | grammY
+// ======================================================
+
+const BOT_VERSION = "6.0.0"
 
 const ADMIN_ID = 8207612971
-const BOT_VERSION = "GOLD TRADE ACCESS v6.0"
-
-const MAIN_CHANNEL_URL = "https://t.me/goldtrade_evgen"
-const SUPPORT_URL = "https://t.me/GT_EVGEN"
-
-const REFERRAL_URL = "https://po-ru4.click/smart/bvdTV2aDJ48lYW"
-
-const BONUS_URL =
-  "https://po-ru4.click/register?utm_campaign=873587&utm_source=affiliate&utm_medium=sr&a=bvdTV2aDJ48lYW&al=1810953&ac=goldtrade&cid=991310&code=WELCOME50"
-
-const VIP_CHAT_ID = -1004332935139
-const CHAT_ID = -1003738170914
-const ACADEMY_CHAT_ID = -1003726976169
 
 const STORAGE_DIR = "/data/storage"
 
-const USERS_FILE = `${STORAGE_DIR}/users.json`
-const APPLICATIONS_FILE = `${STORAGE_DIR}/applications.json`
-const REMINDERS_FILE = `${STORAGE_DIR}/reminders.json`
-const BROADCAST_FILE = `${STORAGE_DIR}/broadcast-draft.json`
+const FILES = {
+  users: path.join(STORAGE_DIR, "users.json"),
+  applications: path.join(STORAGE_DIR, "applications.json"),
+  reminders: path.join(STORAGE_DIR, "reminders.json"),
+  events: path.join(STORAGE_DIR, "pocket-option-events.json"),
+  broadcast: path.join(STORAGE_DIR, "broadcast-draft.json"),
+}
 
-const REMINDER_STAGES = [
-  { day: 1, delay: 24 * 60 * 60 * 1000 },
-  { day: 3, delay: 3 * 24 * 60 * 60 * 1000 },
-  { day: 7, delay: 7 * 24 * 60 * 60 * 1000 },
+const CHANNELS = {
+  VIP: "-1004332935139",
+  CHAT: "-1003738170914",
+  ACADEMY: "-1003726976169",
+}
+
+const LINKS = {
+  bonus10:
+    "https://po-ru4.click/register?utm_campaign=873587&utm_source=affiliate&utm_medium=sr&a=bvdTV2aDJ48lYW&al=1810953&ac=goldtrade&cid=991310&code=WELCOME50",
+
+  bonus50:
+    "https://po-ru4.click/register?utm_campaign=873587&utm_source=affiliate&utm_medium=sr&a=bvdTV2aDJ48lYW&al=1811777&ac=goldtrade50&cid=991998&code=50START",
+
+  noBonus:
+    "https://po-ru4.click/smart/bvdTV2aDJ48lYW",
+}
+
+const SUPPORT_URL = "https://t.me/GT_EVGEN"
+const MAIN_CHANNEL_URL = "https://t.me/goldtrade_evgen"
+
+const REMINDER_DELAYS = [
+  24 * 60 * 60 * 1000,
+  3 * 24 * 60 * 60 * 1000,
+  7 * 24 * 60 * 60 * 1000,
+]
+
+const REMINDER_TEXTS = [
+  "Вы начали знакомство с GOLD TRADE, но ещё не отправили заявку.\n\nЕсли хотите продолжить, нажмите кнопку ниже. Решение о предоставлении доступа принимает администратор.",
+
+  "Напоминаем о GOLD TRADE ACCESS.\n\nЕсли вы всё ещё заинтересованы в закрытом сообществе, можете продолжить оформление заявки.",
+
+  "Это последнее автоматическое напоминание о GOLD TRADE ACCESS.\n\nЕсли предложение вам больше не актуально, просто проигнорируйте это сообщение или отключите напоминания.",
 ]
 
 const userStates = new Map()
 const adminStates = new Map()
-const storeQueues = new Map()
 
-let reminderTimerStarted = false
+let reminderWorkerRunning = false
+let broadcastRunning = false
 
-// ==========================================
+const fileQueues = new Map()
+
+// ======================================================
 // STORAGE
-// ==========================================
+// ======================================================
 
 async function ensureStorage() {
   await mkdir(STORAGE_DIR, { recursive: true })
-}
 
-async function readStore(file, fallback = {}) {
-  await ensureStorage()
-
-  try {
-    return JSON.parse(await readFile(file, "utf8"))
-  } catch (error) {
-    if (error.code === "ENOENT") return fallback
-    throw error
-  }
-}
-
-async function writeStore(file, data) {
-  await ensureStorage()
-
-  const temp = `${file}.tmp`
-  await writeFile(temp, JSON.stringify(data, null, 2), "utf8")
-  await rename(temp, file)
-}
-
-async function updateStore(file, fallback, updater) {
-  const previous = storeQueues.get(file) || Promise.resolve()
-
-  const operation = previous
-    .catch(() => {})
-    .then(async () => {
-      const data = await readStore(file, fallback)
-      const result = await updater(data)
-      await writeStore(file, data)
-      return result
-    })
-
-  storeQueues.set(file, operation)
-
-  try {
-    return await operation
-  } finally {
-    if (storeQueues.get(file) === operation) {
-      storeQueues.delete(file)
+  for (const file of Object.values(FILES)) {
+    try {
+      await readFile(file, "utf8")
+    } catch {
+      await writeFile(file, "{}", "utf8")
     }
   }
 }
 
-const loadUsers = () => readStore(USERS_FILE, {})
-const loadApplications = () => readStore(APPLICATIONS_FILE, {})
-const loadReminders = () => readStore(REMINDERS_FILE, {})
+async function readStore(name) {
+  try {
+    const raw = await readFile(FILES[name], "utf8")
+    const parsed = JSON.parse(raw)
 
-const saveUsers = (data) => writeStore(USERS_FILE, data)
-const saveApplications = (data) => writeStore(APPLICATIONS_FILE, data)
-const saveReminders = (data) => writeStore(REMINDERS_FILE, data)
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {}
+    }
 
-// ==========================================
-// HELPERS
-// ==========================================
-
-function isAdmin(userId) {
-  return Number(userId) === ADMIN_ID
+    return parsed
+  } catch {
+    return {}
+  }
 }
 
-function buildReferralUrl(userId, useBonus = false) {
-  const url = new URL(useBonus ? BONUS_URL : REFERRAL_URL)
-  url.searchParams.set("sub_id1", String(userId))
-  return url.toString()
+async function writeStore(name, data) {
+  const file = FILES[name]
+  const temporaryFile = `${file}.tmp`
+
+  await writeFile(
+    temporaryFile,
+    JSON.stringify(data, null, 2),
+    "utf8",
+  )
+
+  await rename(temporaryFile, file)
+}
+
+async function updateStore(name, updater) {
+  const previous = fileQueues.get(name) || Promise.resolve()
+
+  const current = previous.then(async () => {
+    const data = await readStore(name)
+    const result = await updater(data)
+    await writeStore(name, data)
+    return result
+  })
+
+  fileQueues.set(name, current.catch(() => {}))
+
+  return current
+}
+
+function now() {
+  return Date.now()
+}
+
+function isAdmin(ctx) {
+  return Number(ctx.from?.id) === ADMIN_ID
+}
+
+function userId(ctx) {
+  return String(ctx.from.id)
+}
+
+function escapeText(value) {
+  return String(value ?? "").slice(0, 3500)
 }
 
 function mainKeyboard() {
   return new InlineKeyboard()
-    .text("👑 ПОЛУЧИТЬ ДОСТУП", "menu:join")
+    .text("🚀 Подать заявку", "apply")
     .row()
-    .text("📊 МОЙ СТАТУС", "menu:status")
-    .text("🎓 ACADEMY", "menu:academy")
+    .text("🎁 Регистрация", "registration")
     .row()
-    .text("ℹ️ О ПРОЕКТЕ", "menu:about")
-    .text("⚠️ ПРАВИЛА", "menu:rules")
+    .text("📊 Мой статус", "status")
     .row()
-    .url("💬 ПОДДЕРЖКА", SUPPORT_URL)
-    .url("📢 КАНАЛ", MAIN_CHANNEL_URL)
-}
-
-function joinKeyboard(userId) {
-  return new InlineKeyboard()
-    .url("🟡 РЕГИСТРАЦИЯ", buildReferralUrl(userId))
+    .text("📚 Академия", "academy")
     .row()
-    .url("🎁 РЕГИСТРАЦИЯ С БОНУСОМ", buildReferralUrl(userId, true))
+    .text("📢 Наш канал", "channel")
+    .text("🆘 Поддержка", "support")
     .row()
-    .text("✅ Я УЖЕ ЗАРЕГИСТРИРОВАЛСЯ", "join:registered")
-    .row()
-    .text("📝 ПОДАТЬ ЗАЯВКУ", "join:apply")
-    .row()
-    .text("❓ НУЖНА ПОМОЩЬ", "join:help")
-    .row()
-    .text("🔕 НЕ ПОЛУЧАТЬ НАПОМИНАНИЯ", "reminders:stop")
-    .row()
-    .text("⬅️ ГЛАВНОЕ МЕНЮ", "menu:home")
-}
-
-function reminderKeyboard(userId) {
-  return new InlineKeyboard()
-    .url("🟡 ПЕРЕЙТИ К РЕГИСТРАЦИИ", buildReferralUrl(userId))
-    .row()
-    .text("📝 ПОДАТЬ ЗАЯВКУ", "join:apply")
-    .row()
-    .text("❓ ЗАДАТЬ ВОПРОС", "join:help")
-    .row()
-    .text("🔕 БОЛЬШЕ НЕ НАПОМИНАТЬ", "reminders:stop")
+    .text("ℹ️ О проекте", "about")
+    .text("⚠️ Риски", "risks")
 }
 
 function adminKeyboard() {
   return new InlineKeyboard()
-    .text("📊 СТАТИСТИКА", "admin:stats")
+    .text("📥 Заявки", "admin:applications")
     .row()
-    .text("📋 ЗАЯВКИ", "admin:applications")
+    .text("📊 Статистика", "admin:stats")
     .row()
-    .text("📨 РАССЫЛКА", "admin:broadcast")
+    .text("📨 Рассылка", "admin:broadcast")
     .row()
-    .text("🔄 ОБНОВИТЬ", "admin:home")
+    .text("🏠 Главное меню", "home")
 }
 
-function applicationKeyboard(userId) {
+function registrationKeyboard() {
   return new InlineKeyboard()
-    .text("✅ ОДОБРИТЬ", `application:approve:${userId}`)
-    .text("❌ ОТКЛОНИТЬ", `application:reject:${userId}`)
+    .url("🎁 Бонус 50% — депозит 10", LINKS.bonus10)
+    .row()
+    .url("🎁 Бонус 50% — депозит $50", LINKS.bonus50)
+    .row()
+    .url("Регистрация без бонуса", LINKS.noBonus)
+    .row()
+    .text("⬅️ Назад", "home")
 }
 
-function formatDate(value) {
-  if (!value) return "—"
-
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return "—"
-
-  return date.toLocaleString("ru-RU", {
-    timeZone: "Asia/Almaty",
-  })
+function applicationKeyboard() {
+  return new InlineKeyboard()
+    .text("📝 Отправить заявку", "apply")
+    .row()
+    .text("⬅️ Главное меню", "home")
 }
 
-async function safeEdit(ctx, text, options = {}) {
-  try {
-    await ctx.editMessageText(text, options)
-  } catch (error) {
-    const description = String(error.description || error.message)
-
-    if (!description.includes("message is not modified")) {
-      throw error
-    }
-  }
+function adminApplicationKeyboard(id) {
+  return new InlineKeyboard()
+    .text("✅ Одобрить", `approve:${id}`)
+    .text("❌ Отклонить", `reject:${id}`)
+    .row()
+    .text("🔄 Обновить", `application:${id}`)
 }
 
-async function answerCallback(ctx, text = "") {
-  try {
-    await ctx.answerCallbackQuery({ text })
-  } catch {}
-}
+function inviteKeyboard(invites) {
+  const keyboard = new InlineKeyboard()
 
-async function notifyAdmin(bot, text, keyboard) {
-  try {
-    await bot.api.sendMessage(ADMIN_ID, text, {
-      reply_markup: keyboard,
-    })
-  } catch (error) {
-    console.error("[ADMIN NOTIFICATION]", error.message)
-  }
-}
+  if (invites.VIP) keyboard.url("👑 VIP", invites.VIP)
+  if (invites.CHAT) keyboard.url("💬 CHAT", invites.CHAT)
+  if (invites.ACADEMY) keyboard.url("🎓 ACADEMY", invites.ACADEMY)
 
-// ==========================================
-// USER REGISTRATION
-// ==========================================
+  return keyboard
+}
 
 async function registerUser(ctx) {
-  if (!ctx.from) return
+  const id = userId(ctx)
 
-  const id = String(ctx.from.id)
-
-  await updateStore(USERS_FILE, {}, (users) => {
-    const old = users[id] || {}
+  await updateStore("users", (users) => {
+    const previous = users[id] || {}
 
     users[id] = {
-      ...old,
-      userId: id,
-      username: ctx.from.username || old.username || null,
-      firstName: ctx.from.first_name || old.firstName || null,
-      lastName: ctx.from.last_name || old.lastName || null,
-      firstSeenAt: old.firstSeenAt || new Date().toISOString(),
-      lastSeenAt: new Date().toISOString(),
+      id,
+      username: ctx.from.username || previous.username || "",
+      firstName: ctx.from.first_name || previous.firstName || "",
+      lastName: ctx.from.last_name || previous.lastName || "",
+      createdAt: previous.createdAt || now(),
+      lastSeenAt: now(),
+      ...previous,
     }
   })
 }
 
-// ==========================================
+// ======================================================
 // REMINDERS
-// ==========================================
+// ======================================================
 
-async function startReminder(userId) {
-  const id = String(userId)
+async function startReminder(id) {
+  await updateStore("reminders", (reminders) => {
+    const previous = reminders[id] || {}
 
-  await updateStore(REMINDERS_FILE, {}, (reminders) => {
-    const old = reminders[id]
-
-    // Не отменяем постоянный отказ пользователя.
-    if (old?.optOut) return
-
-    if (old?.active) return
+    if (previous.optOut) return
 
     reminders[id] = {
-      userId: id,
-      startedAt: new Date().toISOString(),
-      sentStages: old?.sentStages || [],
-      skippedStages: old?.skippedStages || [],
+      startedAt: now(),
+      stage: 0,
       active: true,
       optOut: false,
+      ...previous,
+      active: true,
+      startedAt: previous.startedAt || now(),
     }
   })
 }
 
-async function stopReminder(userId, optOut = false) {
-  const id = String(userId)
-
-  await updateStore(REMINDERS_FILE, {}, (reminders) => {
-    const old = reminders[id] || {
-      userId: id,
-      startedAt: new Date().toISOString(),
-      sentStages: [],
-      skippedStages: [],
-    }
+async function stopReminder(id) {
+  await updateStore("reminders", (reminders) => {
+    const previous = reminders[id] || {}
 
     reminders[id] = {
-      ...old,
+      ...previous,
       active: false,
-      optOut: optOut ? true : Boolean(old.optOut),
-      stoppedAt: new Date().toISOString(),
+      stoppedAt: now(),
     }
   })
 }
 
-async function enableReminders(userId) {
-  const id = String(userId)
-
-  await updateStore(REMINDERS_FILE, {}, (reminders) => {
+async function optOutReminder(id) {
+  await updateStore("reminders", (reminders) => {
     reminders[id] = {
-      userId: id,
-      startedAt: new Date().toISOString(),
-      sentStages: [],
-      skippedStages: [],
-      active: true,
+      ...(reminders[id] || {}),
+      active: false,
+      optOut: true,
+      optedOutAt: now(),
+    }
+  })
+}
+
+async function optInReminder(id) {
+  await updateStore("reminders", (reminders) => {
+    reminders[id] = {
+      ...(reminders[id] || {}),
+      active: false,
       optOut: false,
+      stage: 0,
+      startedAt: now(),
     }
   })
 }
 
 async function processDueReminders(bot) {
-  const [reminders, applications] = await Promise.all([
-    loadReminders(),
-    loadApplications(),
-  ])
+  if (reminderWorkerRunning) return
 
-  const now = Date.now()
+  reminderWorkerRunning = true
 
-  for (const [id, reminder] of Object.entries(reminders)) {
-    if (!reminder?.active || reminder.optOut) continue
+  try {
+    const reminders = await readStore("reminders")
+    const applications = await readStore("applications")
 
-    const application = applications[id]
+    for (const [id, reminder] of Object.entries(reminders)) {
+      if (!reminder.active || reminder.optOut) continue
 
-    if (
-      application &&
-      ["pending", "approved", "rejected"].includes(application.status)
-    ) {
-      await stopReminder(id)
-      continue
-    }
+      const application = applications[id]
 
-    const startedAt = new Date(reminder.startedAt).getTime()
-    if (!Number.isFinite(startedAt)) {
-      await stopReminder(id)
-      continue
-    }
+      if (
+        application &&
+        ["pending", "approving", "approved", "rejected"].includes(
+          application.status,
+        )
+      ) {
+        await stopReminder(id)
+        continue
+      }
 
-    const sent = reminder.sentStages || []
-    const skipped = reminder.skippedStages || []
+      const elapsed = now() - Number(reminder.startedAt || now())
 
-    const due = REMINDER_STAGES.filter((stage) => {
-      return (
-        now - startedAt >= stage.delay &&
-        !sent.includes(stage.day) &&
-        !skipped.includes(stage.day)
-      )
-    })
+      let dueStage = -1
 
-    if (!due.length) continue
-
-    // Если бот был выключен несколько дней,
-    // не отправляем пользователю все пропущенные сообщения подряд.
-    const selected = due[due.length - 1]
-
-    for (const stage of due) {
-      if (stage.day !== selected.day) skipped.push(stage.day)
-    }
-
-    const messages = {
-      1:
-        "👋 Вы недавно интересовались GOLD TRADE ACCESS.\n\n" +
-        "Если остались вопросы по регистрации или доступу, мы готовы помочь.\n\n" +
-        "Продолжить можно в меню ниже.",
-
-      3:
-        "🟡 Напоминаем о GOLD TRADE ACCESS.\n\n" +
-        "Если вы ещё не определились, можете ознакомиться с условиями проекта и задать вопросы поддержке.\n\n" +
-        "Решение остаётся за вами.",
-
-      7:
-        "👑 Это последнее напоминание от GOLD TRADE ACCESS.\n\n" +
-        "Если проект вам интересен, вы можете вернуться к оформлению заявки. Если нет — ничего делать не нужно.",
-    }
-
-    try {
-      await bot.api.sendMessage(id, messages[selected.day], {
-        reply_markup: reminderKeyboard(id),
-      })
-
-      await updateStore(REMINDERS_FILE, {}, (data) => {
-        const current = data[id]
-        if (!current?.active || current.optOut) return
-
-        current.sentStages = [
-          ...(current.sentStages || []),
-          selected.day,
-        ]
-
-        current.skippedStages = skipped
-
-        if (selected.day === 7) {
-          current.active = false
-          current.completedAt = new Date().toISOString()
+      for (let index = 0; index < REMINDER_DELAYS.length; index++) {
+        if (elapsed >= REMINDER_DELAYS[index]) {
+          dueStage = index + 1
         }
-      })
-    } catch (error) {
-      console.error(`[REMINDER ${id}]`, error.message)
+      }
+
+      if (dueStage <= Number(reminder.stage || 0)) continue
+
+      const message = REMINDER_TEXTS[dueStage - 1]
+
+      const keyboard = new InlineKeyboard()
+        .text("🚀 Продолжить", "apply")
+        .row()
+        .text("🔕 Отключить напоминания", "reminder:off")
+
+      try {
+        await bot.api.sendMessage(id, message, {
+          reply_markup: keyboard,
+        })
+
+        await updateStore("reminders", (data) => {
+          if (!data[id]) return
+          data[id].stage = dueStage
+
+          if (dueStage >= 3) {
+            data[id].active = false
+          }
+        })
+      } catch (error) {
+        console.error(`Reminder error for ${id}:`, error.message)
+      }
     }
+  } catch (error) {
+    console.error("Reminder worker error:", error)
+  } finally {
+    reminderWorkerRunning = false
   }
 }
 
-function startReminderTimer(bot) {
-  if (reminderTimerStarted) return
+// ======================================================
+// APPLICATIONS
+// ======================================================
 
-  reminderTimerStarted = true
-
-  setInterval(() => {
-    processDueReminders(bot).catch((error) => {
-      console.error("[REMINDER WORKER]", error)
-    })
-  }, 60 * 1000)
-
-  processDueReminders(bot).catch((error) => {
-    console.error("[REMINDER START]", error)
-  })
-}
-
-// ==========================================
-// USER SCREENS
-// ==========================================
-
-async function showHome(ctx) {
-  await safeEdit(
-    ctx,
-    "👑 GOLD TRADE ACCESS\n\n" +
-      "Добро пожаловать в закрытое пространство GOLD TRADE.\n\n" +
-      "Здесь собраны материалы, сообщество и информация о доступе.\n\n" +
-      "Выберите нужный раздел:",
-    { reply_markup: mainKeyboard() },
-  )
-}
-
-async function showJoin(ctx) {
-  const id = String(ctx.from.id)
+async function askForApplication(ctx) {
+  const id = userId(ctx)
 
   await startReminder(id)
 
-  await safeEdit(
-    ctx,
-    "👑 ПОЛУЧЕНИЕ ДОСТУПА\n\n" +
-      "Чтобы подать заявку на рассмотрение:\n\n" +
-      "1. Ознакомьтесь с регистрацией.\n" +
-      "2. Зарегистрируйтесь на платформе, если ещё не сделали этого.\n" +
-      "3. Нажмите «Подать заявку».\n" +
-      "4. Укажите свой Pocket Option ID.\n\n" +
-      "После этого заявка поступит администратору на ручную проверку.\n\n" +
-      "⚠️ Регистрация сама по себе не гарантирует одобрение.",
-    { reply_markup: joinKeyboard(id) },
-  )
-}
-
-async function showStatus(ctx) {
-  const id = String(ctx.from.id)
-  const applications = await loadApplications()
-  const app = applications[id]
-
-  if (!app) {
-    await safeEdit(
-      ctx,
-      "📊 ВАШ СТАТУС\n\n" +
-        "Заявка пока не найдена.\n\n" +
-        "Вы можете перейти к оформлению доступа.",
-      {
-        reply_markup: new InlineKeyboard()
-          .text("👑 ПОЛУЧИТЬ ДОСТУП", "menu:join")
-          .row()
-          .text("⬅️ НАЗАД", "menu:home"),
-      },
-    )
-    return
-  }
-
-  if (app.status === "pending") {
-    await safeEdit(
-      ctx,
-      "⏳ ЗАЯВКА НА РАССМОТРЕНИИ\n\n" +
-        "Ваша заявка получена и ожидает ручной проверки администратором.\n\n" +
-        `Дата подачи: ${formatDate(app.createdAt)}`,
-      {
-        reply_markup: new InlineKeyboard()
-          .url("💬 ПОДДЕРЖКА", SUPPORT_URL)
-          .row()
-          .text("⬅️ ГЛАВНОЕ МЕНЮ", "menu:home"),
-      },
-    )
-    return
-  }
-
-  if (app.status === "approved") {
-    await safeEdit(
-      ctx,
-      "✅ ВАША ЗАЯВКА ОДОБРЕНА\n\n" +
-        "Доступ был одобрен администратором.\n\n" +
-        "Если приглашения не пришли или срок их действия закончился, обратитесь в поддержку.",
-      {
-        reply_markup: new InlineKeyboard()
-          .text("🔄 ПОЛУЧИТЬ ПРИГЛАШЕНИЯ", "application:resend")
-          .row()
-          .url("💬 ПОДДЕРЖКА", SUPPORT_URL)
-          .row()
-          .text("⬅️ ГЛАВНОЕ МЕНЮ", "menu:home"),
-      },
-    )
-    return
-  }
-
-  if (app.status === "rejected") {
-    await safeEdit(
-      ctx,
-      "❌ ЗАЯВКА НЕ ОДОБРЕНА\n\n" +
-        "По результатам проверки доступ не был предоставлен.\n\n" +
-        "Если вы считаете, что произошла ошибка, обратитесь в поддержку.",
-      {
-        reply_markup: new InlineKeyboard()
-          .url("💬 ПОДДЕРЖКА", SUPPORT_URL)
-          .row()
-          .text("⬅️ ГЛАВНОЕ МЕНЮ", "menu:home"),
-      },
-    )
-    return
-  }
-
-  await safeEdit(
-    ctx,
-    "📊 СТАТУС ЗАЯВКИ\n\n" +
-      `Статус: ${app.status || "неизвестен"}`,
-    { reply_markup: mainKeyboard() },
-  )
-}
-
-async function showAbout(ctx) {
-  await safeEdit(
-    ctx,
-    "ℹ️ О GOLD TRADE\n\n" +
-      "GOLD TRADE — закрытое сообщество для участников, интересующихся торговлей и аналитическими материалами.\n\n" +
-      "В проекте доступны информационные материалы, сообщество и обучающий раздел.\n\n" +
-      "Доступ предоставляется после ручного рассмотрения заявки.\n\n" +
-      "⚠️ Торговля связана с финансовыми рисками.",
-    { reply_markup: mainKeyboard() },
-  )
-}
-
-async function showRules(ctx) {
-  await safeEdit(
-    ctx,
-    "⚠️ ПРАВИЛА И РИСКИ\n\n" +
-      "1. Торговля бинарными опционами сопряжена с высоким риском.\n\n" +
-      "2. Вы можете потерять весь внесённый депозит.\n\n" +
-      "3. Сигналы, алгоритмы и обучающие материалы не гарантируют прибыль.\n\n" +
-      "4. Не используйте заёмные деньги и средства, потерю которых не можете себе позволить.\n\n" +
-      "5. Самостоятельно оценивайте риски и принимайте решения.\n\n" +
-      "6. Не передавайте третьим лицам пароли, коды подтверждения и доступ к аккаунту.",
-    { reply_markup: mainKeyboard() },
-  )
-}
-
-async function showAcademy(ctx) {
-  const applications = await loadApplications()
-  const app = applications[String(ctx.from.id)]
-
-  let message =
-    "🎓 GOLD TRADE ACADEMY\n\n" +
-    "Обучающий раздел проекта.\n\n" +
-    "Материалы предназначены для ознакомления с основами торговли и управления рисками."
-
-  if (app?.status === "approved") {
-    message += "\n\n✅ Ваша заявка одобрена. Используйте приглашение, которое было отправлено вам ранее."
-  } else {
-    message += "\n\n🔒 Для получения доступа сначала необходимо подать заявку и дождаться решения администратора."
-  }
-
-  await safeEdit(ctx, message, {
-    reply_markup: new InlineKeyboard()
-      .text("👑 ПОЛУЧИТЬ ДОСТУП", "menu:join")
-      .row()
-      .text("⬅️ ГЛАВНОЕ МЕНЮ", "menu:home"),
-  })
-}
-
-// ==========================================
-// APPLICATIONS
-// ==========================================
-
-async function submitApplication(ctx) {
-  const id = String(ctx.from.id)
-
-  const applications = await loadApplications()
-  const existing = applications[id]
-
-  if (existing?.status === "pending") {
-    userStates.delete(id)
-
-    await ctx.reply(
-      "⏳ Ваша заявка уже находится на рассмотрении.",
-      { reply_markup: mainKeyboard() },
-    )
-    return
-  }
-
-  if (existing?.status === "approved") {
-    userStates.delete(id)
-
-    await ctx.reply(
-      "✅ Ваша заявка уже одобрена.",
-      { reply_markup: mainKeyboard() },
-    )
-    return
-  }
-
-  if (existing?.status === "rejected") {
-    userStates.delete(id)
-
-    await ctx.reply(
-      "❌ Ваша заявка ранее была отклонена. Если вы хотите уточнить причину, обратитесь в поддержку.",
-      { reply_markup: mainKeyboard() },
-    )
-    return
-  }
-
-  userStates.set(id, { step: "pocket_id" })
+  userStates.set(id, "waiting_pocket_id")
 
   await ctx.reply(
-    "📝 ОФОРМЛЕНИЕ ЗАЯВКИ\n\n" +
-      "Отправьте ваш Pocket Option ID.\n\n" +
-      "Это числовой идентификатор аккаунта.\n\n" +
-      "⚠️ Не отправляйте пароль, код подтверждения или платёжные данные.\n\n" +
-      "Для отмены напишите /cancel",
+    "📝 *Заявка GOLD TRADE ACCESS*\n\nОтправьте ваш ID аккаунта Pocket Option.\n\nПосле отправки заявка поступит администратору на ручную проверку.",
+    {
+      parse_mode: "Markdown",
+      reply_markup: new InlineKeyboard()
+        .text("❌ Отмена", "cancel_application"),
+    },
   )
 }
 
-async function createInvitations(bot) {
+async function submitApplication(ctx, pocketId) {
+  const id = userId(ctx)
+  const cleanPocketId = String(pocketId).trim()
+
+  if (!/^[a-zA-Z0-9_-]{3,80}$/.test(cleanPocketId)) {
+    await ctx.reply(
+      "Не удалось распознать ID. Проверьте его и отправьте ещё раз.",
+    )
+    return
+  }
+
+  const result = await updateStore("applications", (applications) => {
+    const existing = applications[id]
+
+    if (
+      existing &&
+      ["pending", "approving", "approved"].includes(existing.status)
+    ) {
+      return { saved: false, existing }
+    }
+
+    applications[id] = {
+      userId: id,
+      pocketId: cleanPocketId,
+      username: ctx.from.username || "",
+      firstName: ctx.from.first_name || "",
+      status: "pending",
+      createdAt: now(),
+      updatedAt: now(),
+    }
+
+    return { saved: true, application: applications[id] }
+  })
+
+  userStates.delete(id)
+  await stopReminder(id)
+
+  if (!result.saved) {
+    const status = result.existing?.status
+
+    await ctx.reply(
+      status === "approved"
+        ? "✅ Ваша заявка уже одобрена."
+        : "⏳ Ваша заявка уже находится на рассмотрении.",
+      { reply_markup: mainKeyboard() },
+    )
+    return
+  }
+
+  await ctx.reply(
+    "✅ Заявка отправлена администратору.\n\nОжидайте решения. Доступ предоставляется только после ручного одобрения.",
+    { reply_markup: mainKeyboard() },
+  )
+
+  const adminText =
+    `📥 НОВАЯ ЗАЯВКА GOLD TRADE\n\n` +
+    `👤 Имя: ${escapeText(ctx.from.first_name)}\n` +
+    `🔗 Username: ${ctx.from.username ? "@" + ctx.from.username : "нет"}\n` +
+    `🆔 Telegram ID: ${id}\n` +
+    `💳 Pocket Option ID: ${cleanPocketId}\n` +
+    `📅 Дата: ${new Date().toLocaleString("ru-RU")}\n\n` +
+    `Статус: ОЖИДАЕТ РЕШЕНИЯ`
+
+  try {
+    await ctx.api.sendMessage(ADMIN_ID, adminText, {
+      reply_markup: adminApplicationKeyboard(id),
+    })
+  } catch (error) {
+    console.error("Cannot notify admin:", error)
+  }
+}
+
+async function createInvitations(ctx) {
   const expiresAt = Math.floor(Date.now() / 1000) + 24 * 60 * 60
 
-  const targets = [
-    { name: "VIP", chatId: VIP_CHAT_ID },
-    { name: "CHAT", chatId: CHAT_ID },
-    { name: "ACADEMY", chatId: ACADEMY_CHAT_ID },
-  ]
+  const invites = {}
 
-  const created = []
+  for (const [name, chatId] of Object.entries(CHANNELS)) {
+    const invite = await ctx.api.createChatInviteLink(chatId, {
+      name: `GOLD TRADE ${name}`,
+      expire_date: expiresAt,
+      member_limit: 1,
+    })
 
-  try {
-    for (const target of targets) {
-      const invite = await bot.api.createChatInviteLink(target.chatId, {
-        name: `GOLD TRADE ${target.name}`,
-        expire_date: expiresAt,
-        member_limit: 1,
-      })
+    invites[name] = invite.invite_link
+  }
 
-      created.push({
-        name: target.name,
-        url: invite.invite_link,
-        chatId: target.chatId,
-      })
+  return invites
+}
+
+async function approveApplication(ctx, id) {
+  if (!isAdmin(ctx)) return
+
+  const reservation = await updateStore("applications", (applications) => {
+    const application = applications[id]
+
+    if (!application || application.status !== "pending") {
+      return false
     }
 
-    return created
-  } catch (error) {
-    // Если создание одного приглашения не удалось,
-    // пробуем отозвать уже созданные ссылки.
-    for (const item of created) {
-      try {
-        await bot.api.revokeChatInviteLink(item.chatId, item.url)
-      } catch {}
-    }
+    application.status = "approving"
+    application.updatedAt = now()
 
-    throw error
-  }
-}
-
-function invitationKeyboard(invites) {
-  const keyboard = new InlineKeyboard()
-
-  for (const invite of invites) {
-    keyboard.url(`🔗 ${invite.name}`, invite.url).row()
-  }
-
-  keyboard.url("💬 ПОДДЕРЖКА", SUPPORT_URL)
-
-  return keyboard
-}
-
-async function sendInvitations(bot, userId, invites) {
-  await bot.api.sendMessage(
-    userId,
-    "👑 GOLD TRADE ACCESS\n\n" +
-      "Ваша заявка одобрена!\n\n" +
-      "Ниже находятся персональные приглашения в разделы проекта.\n\n" +
-      "⏳ Ссылки действуют 24 часа и рассчитаны на одно вступление.\n\n" +
-      "Не пересылайте их другим пользователям.",
-    { reply_markup: invitationKeyboard(invites) },
-  )
-}
-
-// ==========================================
-// ADMIN PANEL
-// ==========================================
-
-async function showAdmin(ctx) {
-  if (!isAdmin(ctx.from.id)) {
-    await answerCallback(ctx, "Нет доступа")
-    return
-  }
-
-  const [users, applications, reminders] = await Promise.all([
-    loadUsers(),
-    loadApplications(),
-    loadReminders(),
-  ])
-
-  const userCount = Object.keys(users).length
-  const allApps = Object.values(applications)
-
-  const pending = allApps.filter((a) => a.status === "pending").length
-  const approved = allApps.filter((a) => a.status === "approved").length
-  const rejected = allApps.filter((a) => a.status === "rejected").length
-
-  const activeReminders = Object.values(reminders).filter(
-    (r) => r.active && !r.optOut,
-  ).length
-
-  const text =
-    "👑 GOLD TRADE — ADMIN PANEL\n\n" +
-    `Версия: ${BOT_VERSION}\n\n` +
-    `👥 Пользователей: ${userCount}\n` +
-    `⏳ На рассмотрении: ${pending}\n` +
-    `✅ Одобрено: ${approved}\n` +
-    `❌ Отклонено: ${rejected}\n` +
-    `🔔 Активные напоминания: ${activeReminders}\n\n` +
-    "Выберите действие:"
-
-  if (ctx.callbackQuery) {
-    await safeEdit(ctx, text, { reply_markup: adminKeyboard() })
-  } else {
-    await ctx.reply(text, { reply_markup: adminKeyboard() })
-  }
-}
-
-async function showAdminStats(ctx) {
-  if (!isAdmin(ctx.from.id)) return
-
-  const [users, applications, reminders] = await Promise.all([
-    loadUsers(),
-    loadApplications(),
-    loadReminders(),
-  ])
-
-  const apps = Object.values(applications)
-
-  const count = (status) =>
-    apps.filter((app) => app.status === status).length
-
-  const text =
-    "📊 ПОЛНАЯ СТАТИСТИКА\n\n" +
-    `Всего пользователей: ${Object.keys(users).length}\n\n` +
-    `Заявок всего: ${apps.length}\n` +
-    `⏳ Ожидают: ${count("pending")}\n` +
-    `✅ Одобрено: ${count("approved")}\n` +
-    `❌ Отклонено: ${count("rejected")}\n\n` +
-    `🔔 Активные напоминания: ${
-      Object.values(reminders).filter((r) => r.active && !r.optOut).length
-    }\n` +
-    `🔕 Отказались от напоминаний: ${
-      Object.values(reminders).filter((r) => r.optOut).length
-    }`
-
-  await safeEdit(ctx, text, {
-    reply_markup: new InlineKeyboard().text("⬅️ АДМИН-ПАНЕЛЬ", "admin:home"),
-  })
-}
-
-async function showPendingApplications(ctx) {
-  if (!isAdmin(ctx.from.id)) return
-
-  const applications = await loadApplications()
-
-  const pending = Object.entries(applications)
-    .filter(([, app]) => app.status === "pending")
-    .slice(0, 20)
-
-  await safeEdit(
-    ctx,
-    `📋 ЗАЯВКИ НА РАССМОТРЕНИИ\n\nОжидают проверки: ${pending.length}`,
-    {
-      reply_markup: new InlineKeyboard()
-        .text("⬅️ АДМИН-ПАНЕЛЬ", "admin:home"),
-    },
-  )
-
-  for (const [userId, app] of pending) {
-    await ctx.api.sendMessage(
-      ADMIN_ID,
-      "📝 ЗАЯВКА\n\n" +
-        `Telegram ID: ${userId}\n` +
-        `Pocket Option ID: ${app.pocketOptionId || "—"}\n` +
-        `Имя: ${app.firstName || "—"}\n` +
-        `Username: ${app.username ? "@" + app.username : "—"}\n` +
-        `Дата: ${formatDate(app.createdAt)}`,
-      { reply_markup: applicationKeyboard(userId) },
-    )
-  }
-}
-
-// ==========================================
-// APPLICATION DECISIONS
-// ==========================================
-
-async function approveApplication(ctx, bot, userId) {
-  if (!isAdmin(ctx.from.id)) return
-
-  const applications = await loadApplications()
-  const app = applications[userId]
-
-  if (!app || app.status !== "pending") {
-    await answerCallback(ctx, "Заявка уже обработана или не найдена.")
-    return
-  }
-
-  let invites
-
-  try {
-    invites = await createInvitations(bot)
-  } catch (error) {
-    console.error("[INVITE CREATION]", error)
-    await answerCallback(ctx, "Не удалось создать приглашения.")
-    return
-  }
-
-  // Сначала сохраняем решение администратора.
-  await updateStore(APPLICATIONS_FILE, {}, (data) => {
-    if (!data[userId] || data[userId].status !== "pending") return
-
-    data[userId] = {
-      ...data[userId],
-      status: "approved",
-      approvedAt: new Date().toISOString(),
-      approvedBy: String(ADMIN_ID),
-      invitations: invites,
-    }
+    return true
   })
 
-  const updated = await loadApplications()
-
-  if (updated[userId]?.status !== "approved") {
-    await answerCallback(ctx, "Не удалось сохранить одобрение.")
+  if (!reservation) {
+    await ctx.answerCallbackQuery({
+      text: "Заявка уже обработана или не найдена.",
+      show_alert: true,
+    })
     return
   }
 
-  await stopReminder(userId)
-
   try {
-    await sendInvitations(bot, userId, invites)
-  } catch (error) {
-    console.error("[SEND INVITATIONS]", error)
+    const invites = await createInvitations(ctx)
+
+    await updateStore("applications", (applications) => {
+      const application = applications[id]
+
+      if (!application || application.status !== "approving") return
+
+      application.status = "approved"
+      application.approvedAt = now()
+      application.invites = invites
+      application.updatedAt = now()
+    })
+
+    await stopReminder(id)
 
     await ctx.api.sendMessage(
-      ADMIN_ID,
-      `⚠️ Заявка ${userId} одобрена, но отправить приглашения пользователю не удалось. Используйте повторную отправку.`,
+      id,
+      "🎉 Ваша заявка GOLD TRADE ACCESS одобрена!\n\nНиже находятся персональные приглашения. Ссылки действуют 24 часа и рассчитаны на одно вступление каждая.",
+      { reply_markup: inviteKeyboard(invites) },
     )
-  }
 
-  await safeEdit(
-    ctx,
-    `✅ ЗАЯВКА ОДОБРЕНА\n\nTelegram ID: ${userId}`,
-  )
+    await ctx.answerCallbackQuery({ text: "Заявка одобрена." })
 
-  await answerCallback(ctx, "Заявка одобрена")
+    await ctx.reply(
+      `✅ Заявка ${id} одобрена. Приглашения отправлены пользователю.`,
+    )
+  } catch (error) {
+    console.error("Approval error:", error)
 
-  await notifyAdmin(
-    bot,
-    `✅ Заявка ${userId} одобрена администратором.`,
-  )
-}
+    await updateStore("applications", (applications) => {
+      const application = applications[id]
 
-async function rejectApplication(ctx, userId) {
-  if (!isAdmin(ctx.from.id)) return
-
-  const result = await updateStore(
-    APPLICATIONS_FILE,
-    {},
-    (applications) => {
-      const app = applications[userId]
-
-      if (!app || app.status !== "pending") return false
-
-      applications[userId] = {
-        ...app,
-        status: "rejected",
-        rejectedAt: new Date().toISOString(),
-        rejectedBy: String(ADMIN_ID),
+      if (application?.status === "approving") {
+        application.status = "pending"
+        application.updatedAt = now()
       }
+    })
 
-      return true
-    },
-  )
+    await ctx.answerCallbackQuery({
+      text: "Не удалось создать или отправить приглашения. Заявка возвращена в ожидание.",
+      show_alert: true,
+    })
+  }
+}
 
-  if (!result) {
-    await answerCallback(ctx, "Заявка уже обработана.")
+async function rejectApplication(ctx, id) {
+  if (!isAdmin(ctx)) return
+
+  const changed = await updateStore("applications", (applications) => {
+    const application = applications[id]
+
+    if (!application || !["pending", "approving"].includes(application.status)) {
+      return false
+    }
+
+    application.status = "rejected"
+    application.rejectedAt = now()
+    application.updatedAt = now()
+
+    return true
+  })
+
+  if (!changed) {
+    await ctx.answerCallbackQuery({
+      text: "Заявка уже обработана.",
+      show_alert: true,
+    })
     return
   }
 
-  await stopReminder(userId)
+  await stopReminder(id)
 
   try {
     await ctx.api.sendMessage(
-      userId,
-      "❌ Ваша заявка не была одобрена.\n\n" +
-        "Если вы хотите уточнить информацию, обратитесь в поддержку.",
+      id,
+      "❌ Ваша заявка GOLD TRADE ACCESS отклонена.\n\nЕсли у вас есть вопросы, обратитесь в поддержку.",
       {
         reply_markup: new InlineKeyboard().url(
-          "💬 ПОДДЕРЖКА",
+          "🆘 Поддержка",
           SUPPORT_URL,
         ),
       },
     )
   } catch (error) {
-    console.error("[REJECT NOTIFICATION]", error.message)
+    console.error("Cannot notify rejected user:", error)
   }
 
-  await safeEdit(
-    ctx,
-    `❌ ЗАЯВКА ОТКЛОНЕНА\n\nTelegram ID: ${userId}`,
-  )
-
-  await answerCallback(ctx, "Заявка отклонена")
+  await ctx.answerCallbackQuery({ text: "Заявка отклонена." })
+  await ctx.reply(`❌ Заявка ${id} отклонена.`)
 }
 
-// ==========================================
-// RESEND INVITATIONS
-// ==========================================
+async function resendInvitations(ctx, id) {
+  if (!isAdmin(ctx)) return
 
-async function resendInvitations(ctx, bot) {
-  const id = String(ctx.from.id)
-  const applications = await loadApplications()
-  const app = applications[id]
+  const applications = await readStore("applications")
+  const application = applications[id]
 
-  if (app?.status !== "approved") {
-    await answerCallback(ctx, "Заявка не одобрена.")
+  if (!application || application.status !== "approved") {
+    await ctx.reply("Одобренная заявка не найдена.")
     return
   }
 
   try {
-    // Используем сохранённые ссылки, если они ещё действуют.
-    const invites = app.invitations || []
+    const invites = await createInvitations(ctx)
 
-    if (invites.length === 3) {
-      await sendInvitations(bot, id, invites)
-    } else {
-      const fresh = await createInvitations(bot)
+    await updateStore("applications", (data) => {
+      if (!data[id] || data[id].status !== "approved") return
 
-      await updateStore(APPLICATIONS_FILE, {}, (data) => {
-        if (data[id]?.status !== "approved") return
-        data[id].invitations = fresh
-      })
+      data[id].invites = invites
+      data[id].updatedAt = now()
+      data[id].lastInviteResentAt = now()
+    })
 
-      await sendInvitations(bot, id, fresh)
-    }
+    await ctx.api.sendMessage(
+      id,
+      "🔄 Администратор обновил ваши приглашения GOLD TRADE ACCESS.\n\nИспользуйте новые ссылки в течение 24 часов.",
+      { reply_markup: inviteKeyboard(invites) },
+    )
 
-    await answerCallback(ctx, "Приглашения отправлены.")
+    await ctx.reply("✅ Новые приглашения созданы и отправлены.")
   } catch (error) {
-    console.error("[RESEND INVITES]", error)
-    await answerCallback(ctx, "Не удалось отправить приглашения.")
+    console.error("Resend invitation error:", error)
+    await ctx.reply("Не удалось создать или отправить новые приглашения.")
   }
 }
 
-// ==========================================
-// BROADCAST
-// ==========================================
+// ======================================================
+// ADMIN: APPLICATIONS AND STATISTICS
+// ======================================================
 
-function broadcastPreviewKeyboard() {
+async function showPendingApplications(ctx) {
+  if (!isAdmin(ctx)) return
+
+  const applications = await readStore("applications")
+
+  const pending = Object.values(applications)
+    .filter((item) => item.status === "pending")
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .slice(0, 30)
+
+  if (!pending.length) {
+    await ctx.reply("📭 Ожидающих заявок нет.")
+    return
+  }
+
+  await ctx.reply(`📥 Ожидают решения: ${pending.length}`)
+
+  for (const app of pending) {
+    const text =
+      `👤 ${escapeText(app.firstName)}\n` +
+      `Username: ${app.username ? "@" + app.username : "нет"}\n` +
+      `Telegram ID: ${app.userId}\n` +
+      `Pocket Option ID: ${app.pocketId}\n` +
+      `Дата: ${new Date(app.createdAt).toLocaleString("ru-RU")}`
+
+    await ctx.reply(text, {
+      reply_markup: adminApplicationKeyboard(app.userId),
+    })
+  }
+}
+
+async function showAdminStats(ctx) {
+  if (!isAdmin(ctx)) return
+
+  const [users, applications, reminders, events] = await Promise.all([
+    readStore("users"),
+    readStore("applications"),
+    readStore("reminders"),
+    readStore("events"),
+  ])
+
+  const apps = Object.values(applications)
+  const eventList = Object.values(events)
+
+  const count = (status) =>
+    apps.filter((item) => item.status === status).length
+
+  const activeReminders = Object.values(reminders).filter(
+    (item) => item.active && !item.optOut,
+  ).length
+
+  await ctx.reply(
+    `📊 GOLD TRADE — СТАТИСТИКА\n\n` +
+    `👥 Пользователей: ${Object.keys(users).length}\n` +
+    `📥 Всего заявок: ${apps.length}\n` +
+    `⏳ На рассмотрении: ${count("pending")}\n` +
+    `🔄 В процессе одобрения: ${count("approving")}\n` +
+    `✅ Одобрено: ${count("approved")}\n` +
+    `❌ Отклонено: ${count("rejected")}\n` +
+    `🔔 Активные напоминания: ${activeReminders}\n` +
+    `📡 События Pocket Option: ${eventList.length}`,
+  )
+}
+
+// ======================================================
+// BROADCAST
+// ======================================================
+
+function broadcastKeyboard() {
   return new InlineKeyboard()
-    .text("✅ ПОДТВЕРДИТЬ РАССЫЛКУ", "broadcast:confirm")
+    .text("✅ Подтвердить рассылку", "broadcast:confirm")
     .row()
-    .text("❌ ОТМЕНИТЬ", "broadcast:cancel")
+    .text("❌ Отменить", "broadcast:cancel")
+}
+
+function buildBroadcastMarkup(buttons = []) {
+  if (!buttons.length) return undefined
+
+  const keyboard = new InlineKeyboard()
+
+  for (const button of buttons) {
+    keyboard.url(button.label, button.url).row()
+  }
+
+  return keyboard
 }
 
 async function beginBroadcast(ctx) {
-  if (!isAdmin(ctx.from.id)) return
+  if (!isAdmin(ctx)) return
 
   adminStates.set(String(ADMIN_ID), {
-    step: "broadcast_content",
+    mode: "broadcast_message",
     buttons: [],
   })
 
-  await safeEdit(
-    ctx,
-    "📨 СОЗДАНИЕ РАССЫЛКИ\n\n" +
-      "Отправьте следующим сообщением текст или фотографию с подписью.\n\n" +
-      "Чтобы добавить URL-кнопку, отправьте команду:\n" +
-      "/broadcast_button Название | https://example.com\n\n" +
-      "Можно добавить до 3 кнопок.\n\n" +
-      "После получения сообщения я покажу предварительный просмотр. Рассылка начнётся только после вашего подтверждения.",
-    {
-      reply_markup: new InlineKeyboard().text(
-        "❌ ОТМЕНА",
-        "broadcast:cancel",
-      ),
-    },
+  await ctx.reply(
+    "📨 РАССЫЛКА GOLD TRADE\n\nОтправьте текст или фотографию с подписью.\n\nДля добавления URL-кнопки используйте команду:\n/broadcast_button Название | https://example.com\n\nПосле подготовки появится предпросмотр и кнопка подтверждения.",
   )
 }
 
 async function addBroadcastButton(ctx) {
-  if (!isAdmin(ctx.from.id)) return
+  if (!isAdmin(ctx)) return
 
   const state = adminStates.get(String(ADMIN_ID))
 
-  if (!state || state.step !== "broadcast_content") {
-    await ctx.reply("Сначала нажмите «Рассылка» в админ-панели.")
+  if (!state || state.mode !== "broadcast_message") {
+    await ctx.reply("Сначала запустите /broadcast.")
     return
   }
 
-  const raw = ctx.message.text.replace("/broadcast_button", "").trim()
-  const parts = raw.split("|")
+  const value = ctx.message.text.replace("/broadcast_button", "").trim()
+  const separator = value.indexOf("|")
 
-  if (parts.length !== 2) {
+  if (separator < 1) {
     await ctx.reply(
-      "Формат команды:\n/broadcast_button Название | https://example.com",
+      "Формат:\n/broadcast_button Название | https://example.com",
     )
     return
   }
 
-  const label = parts[0].trim()
-  const url = parts[1].trim()
+  const label = value.slice(0, separator).trim()
+  const url = value.slice(separator + 1).trim()
 
-  if (!label || label.length > 60 || state.buttons.length >= 3) {
-    await ctx.reply("Название слишком длинное или уже добавлено 3 кнопки.")
+  if (!label || label.length > 50) {
+    await ctx.reply("Название кнопки должно содержать от 1 до 50 символов.")
     return
   }
 
   try {
     const parsed = new URL(url)
-    if (!["http:", "https:"].includes(parsed.protocol)) throw new Error()
+
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+      throw new Error("Invalid protocol")
+    }
   } catch {
-    await ctx.reply("Укажите корректную ссылку, начинающуюся с https:// или http://")
+    await ctx.reply("Некорректная ссылка. Используйте http:// или https://.")
+    return
+  }
+
+  if (state.buttons.length >= 5) {
+    await ctx.reply("Можно добавить не более 5 URL-кнопок.")
     return
   }
 
@@ -1033,270 +765,468 @@ async function addBroadcastButton(ctx) {
 }
 
 async function prepareBroadcast(ctx) {
-  if (!isAdmin(ctx.from.id)) return false
+  if (!isAdmin(ctx)) return
 
   const state = adminStates.get(String(ADMIN_ID))
 
-  if (!state || state.step !== "broadcast_content") return false
+  if (!state || state.mode !== "broadcast_message") return
 
-  if (!ctx.message.text && !ctx.message.photo) {
-    await ctx.reply("Отправьте текстовое сообщение или фотографию с подписью.")
-    return true
-  }
+  const message = ctx.message
 
-  state.step = "broadcast_preview"
-  state.messageId = ctx.message.message_id
-  state.chatId = ctx.chat.id
+  let draft
 
-  await writeStore(BROADCAST_FILE, {
-    messageId: state.messageId,
-    chatId: state.chatId,
-    buttons: state.buttons,
-    createdAt: new Date().toISOString(),
-  })
-
-  const keyboard = new InlineKeyboard()
-
-  for (const button of state.buttons) {
-    keyboard.url(button.label, button.url).row()
-  }
-
-  keyboard.text("✅ ПОДТВЕРДИТЬ", "broadcast:confirm")
-  keyboard.row().text("❌ ОТМЕНИТЬ", "broadcast:cancel")
-
-  await ctx.api.copyMessage(
-    ADMIN_ID,
-    ctx.chat.id,
-    ctx.message.message_id,
-    { reply_markup: keyboard },
-  )
-
-  await ctx.reply(
-    "👆 Выше находится предварительный просмотр.\n\n" +
-      "Проверьте содержание и кнопки. Для отправки нажмите «Подтвердить».",
-  )
-
-  return true
-}
-
-async function cancelBroadcast(ctx) {
-  if (!isAdmin(ctx.from.id)) return
-
-  adminStates.delete(String(ADMIN_ID))
-
-  await writeStore(BROADCAST_FILE, {})
-
-  if (ctx.callbackQuery) {
-    await safeEdit(ctx, "❌ Рассылка отменена.")
-    await answerCallback(ctx, "Рассылка отменена")
+  if (message.photo?.length) {
+    draft = {
+      type: "photo",
+      fileId: message.photo.at(-1).file_id,
+      caption: message.caption || "",
+      buttons: state.buttons,
+      createdAt: now(),
+    }
+  } else if (message.text && !message.text.startsWith("/")) {
+    draft = {
+      type: "text",
+      text: message.text,
+      buttons: state.buttons,
+      createdAt: now(),
+    }
   } else {
-    await ctx.reply("❌ Рассылка отменена.")
-  }
-}
-
-async function confirmBroadcast(ctx, bot) {
-  if (!isAdmin(ctx.from.id)) return
-
-  const draft = await readStore(BROADCAST_FILE, {})
-
-  if (!draft.messageId || !draft.chatId) {
-    await answerCallback(ctx, "Черновик рассылки не найден.")
     return
   }
 
-  const users = await loadUsers()
-  const userIds = Object.keys(users)
+  await writeStore("broadcast", draft)
+  adminStates.delete(String(ADMIN_ID))
 
-  const keyboard = new InlineKeyboard()
+  const previewMarkup = buildBroadcastMarkup(draft.buttons)
 
-  for (const button of draft.buttons || []) {
-    keyboard.url(button.label, button.url).row()
+  if (draft.type === "photo") {
+    await ctx.replyWithPhoto(draft.fileId, {
+      caption: `ПРЕДПРОСМОТР РАССЫЛКИ\n\n${draft.caption}`,
+      reply_markup: broadcastKeyboard(),
+    })
+  } else {
+    await ctx.reply(
+      `ПРЕДПРОСМОТР РАССЫЛКИ\n\n${draft.text}`,
+      {
+        reply_markup: broadcastKeyboard(),
+      },
+    )
   }
 
-  let sent = 0
-  let failed = 0
+  if (previewMarkup) {
+    await ctx.reply("Добавленные URL-кнопки:", {
+      reply_markup: previewMarkup,
+    })
+  }
 
-  await answerCallback(ctx, "Рассылка началась.")
+  await ctx.reply("Проверьте содержание. Отправка начнётся только после подтверждения.")
+}
 
-  await safeEdit(
-    ctx,
-    "📨 РАССЫЛКА ВЫПОЛНЯЕТСЯ\n\n" +
-      `Получателей: ${userIds.length}\n\n` +
-      "Пожалуйста, дождитесь отчёта.",
-  )
+async function cancelBroadcast(ctx) {
+  if (!isAdmin(ctx)) return
 
-  for (const userId of userIds) {
-    try {
-      const options = (draft.buttons || []).length
-        ? { reply_markup: keyboard }
-        : {}
+  if (broadcastRunning) {
+    await ctx.answerCallbackQuery({
+      text: "Рассылка уже выполняется.",
+      show_alert: true,
+    })
+    return
+  }
 
-      await bot.api.copyMessage(
-        userId,
-        draft.chatId,
-        draft.messageId,
-        options,
-      )
+  await writeStore("broadcast", {})
+  adminStates.delete(String(ADMIN_ID))
 
-      sent++
-    } catch (error) {
-      failed++
-      console.error(`[BROADCAST ${userId}]`, error.message)
+  await ctx.answerCallbackQuery({ text: "Рассылка отменена." })
+  await ctx.reply("❌ Черновик рассылки удалён.")
+}
+
+async function confirmBroadcast(ctx) {
+  if (!isAdmin(ctx)) return
+
+  if (broadcastRunning) {
+    await ctx.answerCallbackQuery({
+      text: "Рассылка уже выполняется.",
+      show_alert: true,
+    })
+    return
+  }
+
+  broadcastRunning = true
+
+  try {
+    const draft = await readStore("broadcast")
+
+    if (!draft.type || !["text", "photo"].includes(draft.type)) {
+      await ctx.answerCallbackQuery({
+        text: "Черновик не найден.",
+        show_alert: true,
+      })
+      return
     }
 
-    // Ограничиваем скорость отправки.
-    await new Promise((resolve) => setTimeout(resolve, 40))
-  }
+    await ctx.answerCallbackQuery({ text: "Рассылка началась." })
 
-  adminStates.delete(String(ADMIN_ID))
-  await writeStore(BROADCAST_FILE, {})
+    const users = await readStore("users")
+    const ids = Object.keys(users).filter((id) => Number(id) !== ADMIN_ID)
 
-  await ctx.api.sendMessage(
-    ADMIN_ID,
-    "✅ РАССЫЛКА ЗАВЕРШЕНА\n\n" +
-      `👥 Всего получателей: ${userIds.length}\n` +
+    let sent = 0
+    let failed = 0
+
+    const markup = buildBroadcastMarkup(draft.buttons || [])
+
+    await ctx.reply(`📨 Рассылка запущена. Получателей: ${ids.length}`)
+
+    for (const id of ids) {
+      try {
+        if (draft.type === "photo") {
+          await ctx.api.sendPhoto(id, draft.fileId, {
+            caption: draft.caption || "",
+            reply_markup: markup,
+          })
+        } else {
+          await ctx.api.sendMessage(id, draft.text, {
+            reply_markup: markup,
+          })
+        }
+
+        sent++
+      } catch (error) {
+        failed++
+        console.error(`Broadcast error for ${id}:`, error.message)
+      }
+
+      // Небольшая пауза между отправками
+      await new Promise((resolve) => setTimeout(resolve, 40))
+    }
+
+    await writeStore("broadcast", {})
+
+    await ctx.reply(
+      `✅ РАССЫЛКА ЗАВЕРШЕНА\n\n` +
+      `👥 Получателей: ${ids.length}\n` +
       `✅ Отправлено: ${sent}\n` +
       `❌ Ошибок: ${failed}`,
-    { reply_markup: adminKeyboard() },
+    )
+  } catch (error) {
+    console.error("Broadcast error:", error)
+
+    await ctx.reply(
+      "⚠️ Во время рассылки произошла ошибка. Проверьте журнал FadeHost.",
+    )
+  } finally {
+    broadcastRunning = false
+  }
+}
+
+// ======================================================
+// USER INFORMATION
+// ======================================================
+
+async function showHome(ctx) {
+  await ctx.reply(
+    "✦ GOLD TRADE ACCESS ✦\n\nДобро пожаловать!\n\nВыберите нужный раздел:",
+    { reply_markup: mainKeyboard() },
   )
 }
 
-// ==========================================
-// CALLBACKS
-// ==========================================
-
-function registerCallbacks(bot) {
-  bot.callbackQuery(/^menu:/, async (ctx) => {
-    await answerCallback(ctx)
-
-    const action = ctx.callbackQuery.data.split(":")[1]
-
-    if (action === "home") return showHome(ctx)
-    if (action === "join") return showJoin(ctx)
-    if (action === "status") return showStatus(ctx)
-    if (action === "about") return showAbout(ctx)
-    if (action === "rules") return showRules(ctx)
-    if (action === "academy") return showAcademy(ctx)
-  })
-
-  bot.callbackQuery("join:registered", async (ctx) => {
-    await answerCallback(ctx)
-
-    await safeEdit(
-      ctx,
-      "✅ ЕСЛИ ВЫ УЖЕ ЗАРЕГИСТРИРОВАЛИСЬ\n\n" +
-        "Следующий шаг — подать заявку на ручное рассмотрение.",
-      {
-        reply_markup: new InlineKeyboard()
-          .text("📝 ПОДАТЬ ЗАЯВКУ", "join:apply")
-          .row()
-          .text("⬅️ НАЗАД", "menu:join"),
-      },
-    )
-  })
-
-  bot.callbackQuery("join:apply", async (ctx) => {
-    await answerCallback(ctx)
-    await submitApplication(ctx)
-  })
-
-  bot.callbackQuery("join:help", async (ctx) => {
-    await answerCallback(ctx)
-
-    await safeEdit(
-      ctx,
-      "❓ НУЖНА ПОМОЩЬ?\n\n" +
-        "Напишите в поддержку. Вам помогут разобраться с регистрацией и оформлением заявки.",
-      {
-        reply_markup: new InlineKeyboard()
-          .url("💬 НАПИСАТЬ В ПОДДЕРЖКУ", SUPPORT_URL)
-          .row()
-          .text("⬅️ НАЗАД", "menu:join"),
-      },
-    )
-  })
-
-  bot.callbackQuery("reminders:stop", async (ctx) => {
-    await stopReminder(ctx.from.id, true)
-    await answerCallback(ctx, "Напоминания отключены.")
-
-    await safeEdit(
-      ctx,
-      "🔕 НАПОМИНАНИЯ ОТКЛЮЧЕНЫ\n\n" +
-        "Мы больше не будем отправлять вам автоматические напоминания.\n\n" +
-        "Вы можете самостоятельно вернуться в проект в любое время.",
-      {
-        reply_markup: new InlineKeyboard().text(
-          "⬅️ ГЛАВНОЕ МЕНЮ",
-          "menu:home",
-        ),
-      },
-    )
-  })
-
-  bot.callbackQuery("reminders:enable", async (ctx) => {
-    await enableReminders(ctx.from.id)
-    await answerCallback(ctx, "Напоминания включены.")
-    await showJoin(ctx)
-  })
-
-  bot.callbackQuery("admin:home", async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return answerCallback(ctx, "Нет доступа")
-    await answerCallback(ctx)
-    await showAdmin(ctx)
-  })
-
-  bot.callbackQuery("admin:stats", async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return answerCallback(ctx, "Нет доступа")
-    await answerCallback(ctx)
-    await showAdminStats(ctx)
-  })
-
-  bot.callbackQuery("admin:applications", async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return answerCallback(ctx, "Нет доступа")
-    await answerCallback(ctx)
-    await showPendingApplications(ctx)
-  })
-
-  bot.callbackQuery("admin:broadcast", async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return answerCallback(ctx, "Нет доступа")
-    await answerCallback(ctx)
-    await beginBroadcast(ctx)
-  })
-
-  bot.callbackQuery("broadcast:cancel", cancelBroadcast)
-
-  bot.callbackQuery("broadcast:confirm", async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return answerCallback(ctx, "Нет доступа")
-    await confirmBroadcast(ctx, bot)
-  })
-
-  bot.callbackQuery(/^application:approve:/, async (ctx) => {
-    const userId = ctx.callbackQuery.data.split(":")[2]
-    await approveApplication(ctx, bot, userId)
-  })
-
-  bot.callbackQuery(/^application:reject:/, async (ctx) => {
-    const userId = ctx.callbackQuery.data.split(":")[2]
-    await rejectApplication(ctx, userId)
-  })
-
-  bot.callbackQuery("application:resend", async (ctx) => {
-    await resendInvitations(ctx, bot)
-  })
+async function showRegistration(ctx) {
+  await ctx.reply(
+    "🎁 ВЫБЕРИТЕ ВАРИАНТ РЕГИСТРАЦИИ\n\n" +
+    "Доступны три варианта:\n\n" +
+    "1. Бонус 50% — минимальный депозит 10, промокод WELCOME50.\n" +
+    "2. Бонус 50% — минимальный депозит $50, промокод 50START.\n" +
+    "3. Регистрация без бонуса.\n\n" +
+    "Выберите подходящий вариант:",
+    { reply_markup: registrationKeyboard() },
+  )
 }
 
-// ==========================================
-// COMMANDS
-// ==========================================
+async function showStatus(ctx) {
+  const id = userId(ctx)
+  const applications = await readStore("applications")
+  const application = applications[id]
 
-export function registerCommands(bot) {
+  if (!application) {
+    await ctx.reply(
+      "У вас пока нет заявки GOLD TRADE ACCESS.",
+      { reply_markup: applicationKeyboard() },
+    )
+    return
+  }
+
+  const statusText = {
+    pending: "⏳ Заявка ожидает решения администратора.",
+    approving: "🔄 Ваша заявка обрабатывается.",
+    approved: "✅ Ваша заявка одобрена.",
+    rejected: "❌ Ваша заявка отклонена.",
+  }
+
+  await ctx.reply(
+    `📊 СТАТУС ЗАЯВКИ\n\n` +
+    `Pocket Option ID: ${application.pocketId}\n\n` +
+    `${statusText[application.status] || "Статус неизвестен."}`,
+    {
+      reply_markup: new InlineKeyboard()
+        .text("🔄 Обновить", "status")
+        .row()
+        .text("⬅️ Главное меню", "home"),
+    },
+  )
+
+  if (application.status === "approved" && application.invites) {
+    await ctx.reply(
+      "Ваши приглашения:",
+      { reply_markup: inviteKeyboard(application.invites) },
+    )
+  }
+}
+
+async function showAbout(ctx) {
+  await ctx.reply(
+    "✦ GOLD TRADE ACCESS ✦\n\n" +
+    "Закрытое сообщество с материалами, общением и обучающими разделами.\n\n" +
+    "Доступ предоставляется после ручной проверки заявки администратором.\n\n" +
+    "Партнёрское раскрытие: GOLD TRADE может получать вознаграждение от Pocket Option при регистрации или активности пользователей по нашим ссылкам.",
+    { reply_markup: mainKeyboard() },
+  )
+}
+
+async function showRisks(ctx) {
+  await ctx.reply(
+    "⚠️ ПРЕДУПРЕЖДЕНИЕ О РИСКАХ\n\n" +
+    "Торговля бинарными опционами связана с высоким риском и может привести к потере всего внесённого депозита.\n\n" +
+    "Никакие сигналы, материалы, роботы или стратегии не гарантируют прибыль.\n\n" +
+    "Не используйте заёмные деньги и не вкладывайте средства, потерю которых не можете себе позволить.\n\n" +
+    "Решения о торговле вы принимаете самостоятельно.",
+    { reply_markup: mainKeyboard() },
+  )
+}
+
+async function showAcademy(ctx) {
+  await ctx.reply(
+    "🎓 GOLD TRADE ACADEMY\n\nДоступ к академии предоставляется после одобрения заявки.",
+    { reply_markup: applicationKeyboard() },
+  )
+}
+
+// ======================================================
+// CALLBACKS
+// ======================================================
+
+async function handleCallback(ctx) {
+  const data = ctx.callbackQuery.data || ""
+  const id = userId(ctx)
+
+  if (data === "home") {
+    await ctx.answerCallbackQuery()
+    await showHome(ctx)
+    return
+  }
+
+  if (data === "apply") {
+    await ctx.answerCallbackQuery()
+    await askForApplication(ctx)
+    return
+  }
+
+  if (data === "registration") {
+    await ctx.answerCallbackQuery()
+    await showRegistration(ctx)
+    return
+  }
+
+  if (data === "status") {
+    await ctx.answerCallbackQuery()
+    await showStatus(ctx)
+    return
+  }
+
+  if (data === "about") {
+    await ctx.answerCallbackQuery()
+    await showAbout(ctx)
+    return
+  }
+
+  if (data === "risks") {
+    await ctx.answerCallbackQuery()
+    await showRisks(ctx)
+    return
+  }
+
+  if (data === "academy") {
+    await ctx.answerCallbackQuery()
+    await showAcademy(ctx)
+    return
+  }
+
+  if (data === "channel") {
+    await ctx.answerCallbackQuery()
+    await ctx.reply("📢 Наш канал GOLD TRADE:", {
+      reply_markup: new InlineKeyboard().url(
+        "Открыть канал",
+        MAIN_CHANNEL_URL,
+      ),
+    })
+    return
+  }
+
+  if (data === "support") {
+    await ctx.answerCallbackQuery()
+    await ctx.reply("🆘 Поддержка GOLD TRADE:", {
+      reply_markup: new InlineKeyboard().url(
+        "Написать в поддержку",
+        SUPPORT_URL,
+      ),
+    })
+    return
+  }
+
+  if (data === "cancel_application") {
+    userStates.delete(id)
+    await stopReminder(id)
+    await ctx.answerCallbackQuery({ text: "Подача заявки отменена." })
+    await ctx.reply("Подача заявки отменена.", {
+      reply_markup: mainKeyboard(),
+    })
+    return
+  }
+
+  if (data === "reminder:off") {
+    await optOutReminder(id)
+    await ctx.answerCallbackQuery({
+      text: "Напоминания отключены.",
+      show_alert: true,
+    })
+    await ctx.reply(
+      "🔕 Автоматические напоминания отключены. Вы можете вернуться в любое время через меню.",
+      { reply_markup: mainKeyboard() },
+    )
+    return
+  }
+
+  if (data === "reminder:on") {
+    await optInReminder(id)
+    await ctx.answerCallbackQuery({ text: "Напоминания включены." })
+    return
+  }
+
+  if (data === "admin:applications") {
+    if (!isAdmin(ctx)) {
+      await ctx.answerCallbackQuery({ text: "Нет доступа.", show_alert: true })
+      return
+    }
+
+    await ctx.answerCallbackQuery()
+    await showPendingApplications(ctx)
+    return
+  }
+
+  if (data === "admin:stats") {
+    if (!isAdmin(ctx)) {
+      await ctx.answerCallbackQuery({ text: "Нет доступа.", show_alert: true })
+      return
+    }
+
+    await ctx.answerCallbackQuery()
+    await showAdminStats(ctx)
+    return
+  }
+
+  if (data === "admin:broadcast") {
+    if (!isAdmin(ctx)) {
+      await ctx.answerCallbackQuery({ text: "Нет доступа.", show_alert: true })
+      return
+    }
+
+    await ctx.answerCallbackQuery()
+    await beginBroadcast(ctx)
+    return
+  }
+
+  if (data === "broadcast:confirm") {
+    await confirmBroadcast(ctx)
+    return
+  }
+
+  if (data === "broadcast:cancel") {
+    await cancelBroadcast(ctx)
+    return
+  }
+
+  if (data.startsWith("approve:")) {
+    const applicationId = data.slice("approve:".length)
+    await approveApplication(ctx, applicationId)
+    return
+  }
+
+  if (data.startsWith("reject:")) {
+    const applicationId = data.slice("reject:".length)
+    await rejectApplication(ctx, applicationId)
+    return
+  }
+
+  if (data.startsWith("application:")) {
+    if (!isAdmin(ctx)) {
+      await ctx.answerCallbackQuery({ text: "Нет доступа.", show_alert: true })
+      return
+    }
+
+    const applicationId = data.slice("application:".length)
+    const applications = await readStore("applications")
+    const application = applications[applicationId]
+
+    await ctx.answerCallbackQuery()
+
+    if (!application) {
+      await ctx.reply("Заявка не найдена.")
+      return
+    }
+
+    if (application.status === "approved") {
+      await ctx.reply(
+        `Заявка ${applicationId} уже одобрена.`,
+        {
+          reply_markup: new InlineKeyboard().text(
+            "🔄 Создать новые приглашения",
+            `resend:${applicationId}`,
+          ),
+        },
+      )
+    } else {
+      await ctx.reply(`Статус заявки: ${application.status}`)
+    }
+
+    return
+  }
+
+  if (data.startsWith("resend:")) {
+    if (!isAdmin(ctx)) {
+      await ctx.answerCallbackQuery({ text: "Нет доступа.", show_alert: true })
+      return
+    }
+
+    const applicationId = data.slice("resend:".length)
+    await ctx.answerCallbackQuery()
+    await resendInvitations(ctx, applicationId)
+    return
+  }
+
+  await ctx.answerCallbackQuery()
+}
+
+// ======================================================
+// COMMAND REGISTRATION
+// ======================================================
+
+export async function registerCommands(bot) {
+  await ensureStorage()
+
   bot.use(async (ctx, next) => {
-    if (ctx.chat?.type === "private" && ctx.from) {
+    if (ctx.from) {
       try {
         await registerUser(ctx)
       } catch (error) {
-        console.error("[USER REGISTER]", error)
+        console.error("User registration error:", error)
       }
     }
 
@@ -1304,229 +1234,119 @@ export function registerCommands(bot) {
   })
 
   bot.command("start", async (ctx) => {
-    userStates.delete(String(ctx.from.id))
-
-    const payload = ctx.match?.trim() || ""
-
-    await registerUser(ctx)
+    const id = userId(ctx)
+    const payload = ctx.match?.trim()
 
     if (payload === "join") {
-      await startReminder(ctx.from.id)
-      await ctx.reply(
-        "👑 GOLD TRADE ACCESS\n\nДобро пожаловать!",
-        { reply_markup: mainKeyboard() },
-      )
-      return
+      await startReminder(id)
     }
 
-    await ctx.reply(
-      "👑 GOLD TRADE ACCESS\n\n" +
-        "Добро пожаловать в закрытое пространство GOLD TRADE.\n\n" +
-        "Выберите нужный раздел:",
-      { reply_markup: mainKeyboard() },
-    )
+    await showHome(ctx)
   })
 
-  bot.command("join", showJoin)
-  bot.command("about", showAbout)
-  bot.command("status", showStatus)
-  bot.command("rules", showRules)
-  bot.command("help", async (ctx) => {
-    await ctx.reply(
-      "💬 Поддержка: " + SUPPORT_URL,
-      { reply_markup: mainKeyboard() },
-    )
-  })
-
-  bot.command("admin", async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return
-    await showAdmin(ctx)
-  })
-
-  bot.command("version", async (ctx) => {
-    await ctx.reply(BOT_VERSION)
-  })
-
-  bot.command("chatid", async (ctx) => {
-    await ctx.reply(`Chat ID: ${ctx.chat.id}`)
-  })
-
-  bot.command("groupid", async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return
-    await ctx.reply(`Group ID: ${ctx.chat.id}`)
-  })
-
-  bot.command("stopreminders", async (ctx) => {
-    await stopReminder(ctx.from.id, true)
-    await ctx.reply("🔕 Напоминания отключены.")
-  })
-
-  bot.command("enable_reminders", async (ctx) => {
-    await enableReminders(ctx.from.id)
-    await ctx.reply("🔔 Напоминания включены.")
-  })
+  bot.command("menu", showHome)
 
   bot.command("cancel", async (ctx) => {
-    const id = String(ctx.from.id)
-    userStates.delete(id)
-    await stopReminder(id, false)
-
-    await ctx.reply(
-      "Оформление заявки отменено.",
-      { reply_markup: mainKeyboard() },
-    )
-  })
-
-  bot.command("resend", async (ctx) => {
-    const id = String(ctx.from.id)
-    const applications = await loadApplications()
-    const app = applications[id]
-
-    if (app?.status !== "approved") {
-      await ctx.reply("Ваша заявка ещё не одобрена.")
-      return
-    }
-
-    try {
-      const invites = await createInvitations(bot)
-
-      await updateStore(APPLICATIONS_FILE, {}, (data) => {
-        if (data[id]?.status !== "approved") return
-        data[id].invitations = invites
-      })
-
-      await sendInvitations(bot, id, invites)
-    } catch (error) {
-      console.error("[RESEND]", error)
-      await ctx.reply("Не удалось создать приглашения. Напишите в поддержку.")
-    }
-  })
-
-  bot.command("broadcast", async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return
-
-    if (ctx.message.text.trim() !== "/broadcast") {
-      await ctx.reply(
-        "Для создания рассылки используйте кнопку «Рассылка» в админ-панели.",
-      )
-      return
-    }
-
-    await beginBroadcast(ctx)
-  })
-
-  bot.command("broadcast_button", addBroadcastButton)
-
-  registerCallbacks(bot)
-
-  // ========================================
-  // TEXT / PHOTO MESSAGE HANDLER
-  // ========================================
-
-  bot.on("message", async (ctx) => {
-    if (ctx.chat.type !== "private") return
-
-    const id = String(ctx.from.id)
-
-    if (isAdmin(ctx.from.id)) {
-      const adminState = adminStates.get(id)
-
-      if (adminState?.step === "broadcast_content") {
-        await prepareBroadcast(ctx)
-      }
-
-      return
-    }
-
-    const state = userStates.get(id)
-
-    if (!state || state.step !== "pocket_id") return
-
-    if (!ctx.message.text) {
-      await ctx.reply("Отправьте Pocket Option ID обычным текстом.")
-      return
-    }
-
-    const pocketOptionId = ctx.message.text.trim()
-
-    if (!/^\d{4,20}$/.test(pocketOptionId)) {
-      await ctx.reply(
-        "❌ Неверный формат ID.\n\n" +
-          "Отправьте числовой Pocket Option ID длиной от 4 до 20 цифр.\n\n" +
-          "Пароли и коды подтверждения не нужны.",
-      )
-      return
-    }
-
-    const applications = await loadApplications()
-
-    if (applications[id]?.status === "pending") {
-      userStates.delete(id)
-      await ctx.reply("Ваша заявка уже ожидает рассмотрения.")
-      return
-    }
-
-    if (applications[id]?.status === "approved") {
-      userStates.delete(id)
-      await ctx.reply("Ваша заявка уже одобрена.")
-      return
-    }
-
-    if (applications[id]?.status === "rejected") {
-      userStates.delete(id)
-      await ctx.reply("Ваша заявка ранее была отклонена.")
-      return
-    }
-
-    const app = {
-      userId: id,
-      pocketOptionId,
-      username: ctx.from.username || null,
-      firstName: ctx.from.first_name || null,
-      status: "pending",
-      createdAt: new Date().toISOString(),
-    }
-
-    await updateStore(APPLICATIONS_FILE, {}, (data) => {
-      if (data[id]?.status === "pending") return
-      data[id] = app
-    })
-
-    const saved = await loadApplications()
-
+    const id = userId(ctx)
     userStates.delete(id)
     await stopReminder(id)
 
-    if (saved[id]?.status !== "pending") {
-      await ctx.reply("Заявка не была сохранена. Попробуйте ещё раз.")
+    await ctx.reply("Текущий процесс отменён.", {
+      reply_markup: mainKeyboard(),
+    })
+  })
+
+  bot.command("status", showStatus)
+
+  bot.command("about", showAbout)
+
+  bot.command("risks", showRisks)
+
+  bot.command("admin", async (ctx) => {
+    if (!isAdmin(ctx)) {
+      await ctx.reply("⛔ Нет доступа.")
       return
     }
 
     await ctx.reply(
-      "✅ ЗАЯВКА ОТПРАВЛЕНА\n\n" +
-        "Ваша заявка поступила администратору.\n\n" +
-        "После ручной проверки вы получите уведомление о решении.",
-      { reply_markup: mainKeyboard() },
-    )
-
-    const username = ctx.from.username
-      ? `@${ctx.from.username}`
-      : "не указан"
-
-    await notifyAdmin(
-      bot,
-      "📝 НОВАЯ ЗАЯВКА GOLD TRADE\n\n" +
-        `Имя: ${ctx.from.first_name || "—"}\n` +
-        `Username: ${username}\n` +
-        `Telegram ID: ${id}\n` +
-        `Pocket Option ID: ${pocketOptionId}\n` +
-        `Дата: ${formatDate(app.createdAt)}\n\n` +
-        "Требуется ручное решение администратора.",
-      applicationKeyboard(id),
+      "✦ GOLD TRADE — АДМИНИСТРАТОР ✦\n\nВыберите действие:",
+      { reply_markup: adminKeyboard() },
     )
   })
 
-  startReminderTimer(bot)
+  bot.command("version", async (ctx) => {
+    await ctx.reply(`GOLD TRADE ACCESS v${BOT_VERSION}`)
+  })
 
-  console.log(`[${BOT_VERSION}] Commands registered`)
+  bot.command("resend", async (ctx) => {
+    if (!isAdmin(ctx)) {
+      await ctx.reply("⛔ Нет доступа.")
+      return
+    }
+
+    const id = ctx.match?.trim()
+
+    if (!id) {
+      await ctx.reply("Использование: /resend TELEGRAM_ID")
+      return
+    }
+
+    await resendInvitations(ctx, id)
+  })
+
+  bot.command("broadcast", beginBroadcast)
+
+  bot.command("broadcast_button", addBroadcastButton)
+
+  bot.command("reminders_on", async (ctx) => {
+    await optInReminder(userId(ctx))
+    await ctx.reply("🔔 Напоминания включены.")
+  })
+
+  bot.command("reminders_off", async (ctx) => {
+    await optOutReminder(userId(ctx))
+    await ctx.reply("🔕 Напоминания отключены.")
+  })
+
+  bot.command("backup", async (ctx) => {
+    if (!isAdmin(ctx)) return
+    await ctx.reply("Резервное копирование пока не включено.")
+  })
+
+  bot.callbackQuery(/.*/, handleCallback)
+
+  bot.on("message", async (ctx) => {
+    const id = userId(ctx)
+    const text = ctx.message.text
+
+    if (isAdmin(ctx)) {
+      const adminState = adminStates.get(String(ADMIN_ID))
+
+      if (adminState?.mode === "broadcast_message") {
+        await prepareBroadcast(ctx)
+        return
+      }
+    }
+
+    if (userStates.get(id) === "waiting_pocket_id") {
+      if (!text) {
+        await ctx.reply("Пожалуйста, отправьте ID текстом.")
+        return
+      }
+
+      await submitApplication(ctx, text)
+      return
+    }
+  })
+
+  // Worker checks reminders once per minute.
+  const reminderInterval = setInterval(() => {
+    processDueReminders(bot).catch((error) => {
+      console.error("Reminder interval error:", error)
+    })
+  }, 60 * 1000)
+
+  reminderInterval.unref?.()
+
+  console.log(`GOLD TRADE ACCESS v${BOT_VERSION}: commands registered`)
 }
