@@ -1,4 +1,5 @@
 
+
 import {
   mkdir,
   readFile,
@@ -9,19 +10,15 @@ import {
 const STORAGE_DIR = "/data/storage"
 const STORAGE = `${STORAGE_DIR}/pocket-option-events.json`
 
-// Pocket Option event names
 const EVENT_NAMES = {
   reg: "REG",
   registration: "REG",
-
   email: "EMAIL",
   email_confirm: "EMAIL",
   email_confirmation: "EMAIL",
   confirm_email: "EMAIL",
-
   ftd: "FTD",
   first_deposit: "FTD",
-
   redep: "REDEP",
   repeat_deposit: "REDEP",
 }
@@ -70,6 +67,7 @@ function sendResponse(res, status, message) {
   res.writeHead(status, {
     "content-type": "text/plain; charset=utf-8",
   })
+
   res.end(message)
 }
 
@@ -82,6 +80,7 @@ export async function handlePocketOptionPostback(req, res) {
   }
 
   const requestUrl = new URL(req.url, "http://localhost")
+
   const expectedPath =
     `/pocket-option/postback/${encodeURIComponent(secret)}`
 
@@ -161,18 +160,13 @@ export async function handlePocketOptionPostback(req, res) {
     const event = {
       event_id: suppliedEventId || fallbackId,
       event: eventType,
-
       trader_id: traderId,
       tracking_id: trackingId,
-
       click_id: clickId,
       country: String(data.country || ""),
       date_time: dateTime,
       sumdep: String(data.sumdep || ""),
-      
       received_at: new Date().toISOString(),
-
-      // Event is not trusted until Partner API verification.
       verified: false,
       processed: false,
     }
@@ -187,6 +181,7 @@ export async function handlePocketOptionPostback(req, res) {
     )
 
     sendResponse(res, 200, saved ? "OK" : "Duplicate")
+
   } catch (error) {
     console.error(
       "[PO POSTBACK ERROR]",
