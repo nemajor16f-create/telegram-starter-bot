@@ -10,7 +10,7 @@
 
 import http from "node:http"
 import { Bot, webhookCallback } from "grammy"
-mport { mkdir, writeFile, readFile } from "node:fs/promises"
+import { mkdir, writeFile, readFile } from "node:fs/promises"
 import { registerCommands } from "./src/commands.js"
 
 const token = process.env.TELEGRAM_BOT_TOKEN
@@ -21,6 +21,18 @@ if (!token) {
 
 const mode = (process.env.TELEGRAM_MODE || "polling").trim().toLowerCase()
 const bot = new Bot(token)
+async function testStorage() {
+  try {
+    await mkdir("/data/storage", { recursive: true })
+    await writeFile("/data/storage/test.txt", "GOLD TRADE STORAGE OK")
+    const result = await readFile("/data/storage/test.txt", "utf8")
+    console.log("[STORAGE] Проверка:", result)
+  } catch (error) {
+    console.error("[STORAGE] Ошибка:", error.message)
+  }
+}
+
+await testStorage()
 
 bot.use(async (ctx, next) => {
   console.log("[GOLD TRADE] Получено обновление:", Object.keys(ctx.update))
