@@ -11,7 +11,7 @@
 import http from "node:http"
 import { Bot, webhookCallback } from "grammy"
 import { mkdir, writeFile, readFile } from "node:fs/promises"
-import { registerCommands } from "./src/commands.js"
+import { handlePocketOptionPostback } from "./src/postback.js"
 
 const token = process.env.TELEGRAM_BOT_TOKEN
 if (!token) {
