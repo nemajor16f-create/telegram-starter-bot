@@ -168,7 +168,8 @@ export async function handlePocketOptionPostback(req, res) {
       click_id: clickId,
       country: String(data.country || ""),
       date_time: dateTime,
-
+      sumdep: String(data.sumdep || ""),
+      
       received_at: new Date().toISOString(),
 
       // Event is not trusted until Partner API verification.
