@@ -9,7 +9,7 @@ const VIP_CHANNEL_ID = "-1004332935139"
 const ACADEMY_CHANNEL_ID = "-1003726976169"
 
 // Временно. После получения ID группы заменим это значение.
-const CHAT_GROUP_ID = "ВСТАВИТЬ_ID_ГРУППЫ"
+const CHAT_GROUP_ID = "-1003738170914"
 
 const STORAGE_DIR = "/data/storage"
 const STORAGE_FILE = `${STORAGE_DIR}/applications.json`
