@@ -1,10 +1,6 @@
 import { InlineKeyboard } from "grammy"
 import { mkdir, readFile, writeFile, rename } from "node:fs/promises"
 
-// ==========================================
-// GOLD TRADE ACCESS v5.0
-// ==========================================
-
 const ADMIN_ID = 8207612971
 const BOT_VERSION = "GOLD TRADE ACCESS v5.0"
 
@@ -12,6 +8,12 @@ const MAIN_CHANNEL_URL = "https://t.me/goldtrade_evgen"
 const SUPPORT_URL = "https://t.me/GT_EVGEN"
 const REFERRAL_URL = "https://po-ru4.click/smart/bvdTV2aDJ48lYW"
 const BONUS_URL = "https://po-ru4.click/register?utm_campaign=873587&utm_source=affiliate&utm_medium=sr&a=bvdTV2aDJ48lYW&al=1810953&ac=goldtrade&cid=991310&code=WELCOME50"
+
+function buildReferralUrl(userId, useBonus = false) {
+  const url = new URL(useBonus ? BONUS_URL : REFERRAL_URL)
+  url.searchParams.set("sub_id1", String(userId))
+  return url.toString()
+}
 
 const VIP_CHANNEL_ID = "-1004332935139"
 const CHAT_GROUP_ID = "-1003738170914"
@@ -23,10 +25,6 @@ const USERS_FILE = `${STORAGE_DIR}/users.json`
 const REMINDERS_FILE = `${STORAGE_DIR}/reminders.json`
 
 await mkdir(STORAGE_DIR, { recursive: true })
-
-// ==========================================
-// STORAGE
-// ==========================================
 
 async function loadJson(file) {
   try {
@@ -42,11 +40,13 @@ const saveQueues = new Map()
 
 function saveJson(file, data) {
   const previous = saveQueues.get(file) || Promise.resolve()
+
   const operation = previous.catch(() => {}).then(async () => {
     const temp = `${file}.tmp`
     await writeFile(temp, JSON.stringify(data, null, 2), "utf8")
     await rename(temp, file)
   })
+
   saveQueues.set(file, operation)
   return operation
 }
@@ -60,6 +60,7 @@ const saveReminders = (data) => saveJson(REMINDERS_FILE, data)
 
 async function registerUser(from) {
   if (!from?.id) return
+
   const users = await loadUsers()
   const id = String(from.id)
   const now = new Date().toISOString()
@@ -92,9 +93,8 @@ async function stopReminder(userId, reason = "completed") {
 async function startReminder(userId) {
   const id = String(userId)
   const reminders = await loadReminders()
-  const existing = reminders[id]
 
-  if (existing?.active) return
+  if (reminders[id]?.active) return
 
   reminders[id] = {
     userId: id,
@@ -106,10 +106,6 @@ async function startReminder(userId) {
 
   await saveReminders(reminders)
 }
-
-// ==========================================
-// KEYBOARDS
-// ==========================================
 
 function mainMenu() {
   return new InlineKeyboard()
@@ -129,15 +125,14 @@ function mainMenu() {
 }
 
 function backMenu() {
-  return new InlineKeyboard()
-    .text("⬅️ ГЛАВНОЕ МЕНЮ", "home")
+  return new InlineKeyboard().text("⬅️ ГЛАВНОЕ МЕНЮ", "home")
 }
 
-function joinMenu() {
+function joinMenu(userId) {
   return new InlineKeyboard()
-    .url("🚀 РЕГИСТРАЦИЯ", REFERRAL_URL)
+    .url("🚀 РЕГИСТРАЦИЯ", buildReferralUrl(userId))
     .row()
-    .url("🎁 ПОЛУЧИТЬ БОНУС", BONUS_URL)
+    .url("🎁 ПОЛУЧИТЬ БОНУС", buildReferralUrl(userId, true))
     .row()
     .text("✅ УЖЕ ЗАРЕГИСТРИРОВАЛСЯ", "already_registered")
     .row()
@@ -150,9 +145,9 @@ function joinMenu() {
     .text("⬅️ ГЛАВНОЕ МЕНЮ", "home")
 }
 
-function reminderKeyboard() {
+function reminderKeyboard(userId) {
   return new InlineKeyboard()
-    .url("🚀 ПЕРЕЙТИ К РЕГИСТРАЦИИ", REFERRAL_URL)
+    .url("🚀 ПЕРЕЙТИ К РЕГИСТРАЦИИ", buildReferralUrl(userId))
     .row()
     .text("✅ УЖЕ ЗАРЕГИСТРИРОВАЛСЯ", "already_registered")
     .row()
@@ -160,10 +155,6 @@ function reminderKeyboard() {
     .row()
     .text("🔕 БОЛЬШЕ НЕ НАПОМИНАТЬ", "stop_reminders")
 }
-
-// ==========================================
-// USER-FACING PAGES
-// ==========================================
 
 async function showWelcome(ctx) {
   await ctx.reply(
@@ -212,9 +203,7 @@ async function showAbout(ctx) {
 
 🤝 ПАРТНЁРСТВО
 
-GOLD TRADE является партнёром Pocket Option и сотрудничает с платформой в рамках партнёрской программы. При регистрации по нашим ссылкам проект может получать партнёрское вознаграждение. Для новых пользователей предусмотрена отдельная ссылка с приветственным бонусом. Доступность и условия бонуса определяет платформа.
-
-━━━━━━━━━━━━━━━━━━
+GOLD TRADE является партнёром Pocket Option и сотрудничает с платформой в рамках партнёрской программы. При регистрации по нашим ссылкам проект может получать партнёрское вознаграждение.
 
 ⚠️ Торговля бинарными опционами сопряжена с высоким риском. Возможна потеря всего внесённого депозита. Доходность не гарантируется.`,
     {
@@ -254,10 +243,8 @@ async function showJoin(ctx) {
 
 Администратор вручную проверит регистрацию и пополнение. Торговать для получения доступа не требуется.
 
-🤝 GOLD TRADE является партнёром Pocket Option. При регистрации по ссылкам проекта мы можем получать партнёрское вознаграждение.
-
 ⚠️ Бинарные опционы связаны с высоким риском. Можно потерять весь депозит. Прибыль не гарантируется.`,
-    { reply_markup: joinMenu() }
+    { reply_markup: joinMenu(ctx.from.id) }
   )
 }
 
@@ -273,13 +260,7 @@ async function showRules(ctx) {
 
 ━━━━━━━━━━━━━━━━━━
 
-⚠️ ВАЖНО О РИСКАХ
-
-Торговля бинарными опционами является высокорискованной деятельностью. Ты можешь потерять весь внесённый депозит. Сигналы, материалы и эфиры не являются гарантией результата или обещанием дохода. Принимай решения самостоятельно и используй только те средства, потерю которых можешь себе позволить.
-
-━━━━━━━━━━━━━━━━━━
-
-Подавая заявку, ты подтверждаешь, что ознакомился с условиями доступа и понимаешь связанные с торговлей риски.`,
+⚠️ Торговля бинарными опционами является высокорискованной деятельностью. Ты можешь потерять весь внесённый депозит. Сигналы, материалы и эфиры не являются гарантией результата или обещанием дохода.`,
     { reply_markup: backMenu() }
   )
 }
@@ -306,9 +287,7 @@ async function showStatus(ctx) {
 
   if (!application) {
     return ctx.reply(
-      `📌 МОЯ ЗАЯВКА
-
-Ты пока не подавал заявку на вступление. Нажми кнопку ниже, чтобы ознакомиться с условиями.`,
+      "📌 Ты пока не подавал заявку на вступление.",
       {
         reply_markup: new InlineKeyboard()
           .text("👑 ВСТУПИТЬ В КОМАНДУ", "join")
@@ -320,20 +299,16 @@ async function showStatus(ctx) {
 
   if (application.status === "pending") {
     return ctx.reply(
-      `⏳ ЗАЯВКА НА РАССМОТРЕНИИ
+      `⏳ Заявка ожидает ручной проверки.
 
-Pocket Option ID: ${application.poId}
-
-Заявка получена и ожидает ручной проверки администратором. После принятия решения ты получишь уведомление.`,
+Pocket Option ID: ${application.poId}`,
       { reply_markup: backMenu() }
     )
   }
 
   if (application.status === "rejected") {
     return ctx.reply(
-      `❌ ЗАЯВКА ОТКЛОНЕНА
-
-Если считаешь, что произошла ошибка, свяжись с администратором. После уточнения обстоятельств можно будет подать новую заявку.`,
+      "❌ Заявка отклонена. Если считаешь, что произошла ошибка, свяжись с администратором.",
       {
         reply_markup: new InlineKeyboard()
           .url("💬 СВЯЗАТЬСЯ С АДМИНИСТРАТОРОМ", SUPPORT_URL)
@@ -345,11 +320,7 @@ Pocket Option ID: ${application.poId}
 
   if (application.status === "approved") {
     return ctx.reply(
-      `✅ ДОСТУП ОДОБРЕН
-
-Добро пожаловать в GOLD TRADE! Твоя заявка прошла проверку.
-
-Тебе доступны VIP, CHAT и ACADEMY. Если приглашения потерялись или истекли, воспользуйся кнопкой ниже.`,
+      "✅ ДОСТУП ОДОБРЕН. Если приглашения потерялись или истекли, запроси новые.",
       {
         reply_markup: new InlineKeyboard()
           .text("🔄 ПОЛУЧИТЬ ПРИГЛАШЕНИЯ", "resend_invites")
@@ -361,9 +332,7 @@ Pocket Option ID: ${application.poId}
 
   if (application.status === "cancelled") {
     return ctx.reply(
-      `📌 ПОСЛЕДНЯЯ ЗАЯВКА ОТМЕНЕНА
-
-Ты можешь подать новую заявку через главное меню.`,
+      "📌 Последняя заявка отменена. Ты можешь подать новую.",
       {
         reply_markup: new InlineKeyboard()
           .text("👑 ПОДАТЬ НОВУЮ ЗАЯВКУ", "join")
@@ -377,10 +346,6 @@ Pocket Option ID: ${application.poId}
     reply_markup: backMenu()
   })
 }
-
-// ==========================================
-// INVITATIONS
-// ==========================================
 
 async function createInvitations(api) {
   const expireDate = Math.floor(Date.now() / 1000) + 86400
@@ -415,32 +380,18 @@ async function sendInvitations(api, userId, invitations) {
     Number(userId),
     `🎉 ДОБРО ПОЖАЛОВАТЬ В GOLD TRADE!
 
-Твоя заявка одобрена. Доступ открыт!
-
-━━━━━━━━━━━━━━━━━━
-
 👑 VIP GOLD TRADE
 ${invitations.vipInvite}
-
-━━━━━━━━━━━━━━━━━━
 
 💬 CHAT GOLD TRADE
 ${invitations.chatInvite}
 
-━━━━━━━━━━━━━━━━━━
-
 🎓 ACADEMY GOLD TRADE
 ${invitations.academyInvite}
 
-━━━━━━━━━━━━━━━━━━
-
-Каждая ссылка рассчитана на одно вступление и действует 24 часа. Сохрани приглашения и присоединяйся к сообществам!`
+Каждая ссылка рассчитана на одно вступление и действует 24 часа.`
   )
 }
-
-// ==========================================
-// REMINDER ENGINE
-// ==========================================
 
 const REMINDER_STAGES = [
   { day: 1, delay: 24 * 60 * 60 * 1000 },
@@ -449,19 +400,9 @@ const REMINDER_STAGES = [
 ]
 
 const reminderTexts = {
-  1: `👋 Привет! Ты начинал знакомство с GOLD TRADE, но, похоже, ещё не завершил вступление.
-
-Если проект тебе интересен, можешь продолжить регистрацию и затем отправить свой Pocket Option ID.
-
-Если нужна помощь — мы на связи.`,
-  3: `📌 Напоминаем о GOLD TRADE!
-
-Если ты планировал присоединиться к команде, заявку всё ещё можно подать. После регистрации и пополнения отправь свой числовой Pocket Option ID боту.
-
-Условия и риски торговли обязательно оцени самостоятельно.`,
-  7: `👑 Последнее напоминание от GOLD TRADE.
-
-Если тебе по-прежнему интересно наше сообщество, возвращайся к оформлению заявки. Если планы изменились — просто отключи напоминания кнопкой ниже.`
+  1: "👋 Привет! Ты начинал знакомство с GOLD TRADE, но ещё не завершил вступление. Если нужна помощь — мы на связи.",
+  3: "📌 Напоминаем о GOLD TRADE! Если ты планировал присоединиться, заявку всё ещё можно подать.",
+  7: "👑 Последнее напоминание от GOLD TRADE. Если планы изменились, отключи напоминания кнопкой ниже."
 }
 
 async function processDueReminders(bot) {
@@ -499,7 +440,7 @@ async function processDueReminders(bot) {
         await bot.api.sendMessage(
           Number(userId),
           reminderTexts[stage.day],
-          { reply_markup: reminderKeyboard() }
+          { reply_markup: reminderKeyboard(userId) }
         )
 
         reminder.sentStages = [
@@ -511,10 +452,7 @@ async function processDueReminders(bot) {
         changed = true
         break
       } catch (error) {
-        console.error(
-          `[GOLD TRADE] Не удалось отправить напоминание ${stage.day} дн. пользователю ${userId}:`,
-          error?.description || error
-        )
+        console.error("[GOLD TRADE] Ошибка напоминания:", error)
 
         if (error?.error_code === 403) {
           reminder.active = false
@@ -526,25 +464,17 @@ async function processDueReminders(bot) {
       }
     }
 
-    if (
-      REMINDER_STAGES.every((stage) =>
-        (reminder.sentStages || []).includes(stage.day)
-      )
-    ) {
+    if (REMINDER_STAGES.every((stage) =>
+      (reminder.sentStages || []).includes(stage.day)
+    )) {
       reminder.active = false
       reminder.completedAt = new Date().toISOString()
       changed = true
     }
   }
 
-  if (changed) {
-    await saveReminders(reminders)
-  }
+  if (changed) await saveReminders(reminders)
 }
-
-// ==========================================
-// ADMIN TOOLS
-// ==========================================
 
 async function showAdmin(ctx) {
   if (ctx.from.id !== ADMIN_ID) {
@@ -561,36 +491,26 @@ async function showAdmin(ctx) {
   const count = (status) =>
     records.filter((item) => item?.status === status).length
 
-  const optOuts = Object.values(reminders)
-    .filter((item) => item?.optOut).length
-
   const activeReminders = Object.values(reminders)
     .filter((item) => item?.active).length
 
   await ctx.reply(
     `🛠 АДМИН-ПАНЕЛЬ GOLD TRADE
 
-👥 Пользователей запустили бота: ${Object.keys(users).length}
-📨 Начали оформление вступления: ${Object.keys(reminders).length}
+👥 Пользователей: ${Object.keys(users).length}
 ⏳ Заявок на проверке: ${count("pending")}
 ✅ Одобрено: ${count("approved")}
 ❌ Отклонено: ${count("rejected")}
 🔔 Активные напоминания: ${activeReminders}
-🔕 Отключили напоминания: ${optOuts}
 
 Версия: ${BOT_VERSION}
 
-Рассылка: /broadcast текст сообщения`,
+Для рассылки: /broadcast текст сообщения`,
     { reply_markup: backMenu() }
   )
 }
 
 let pendingBroadcast = null
-
-// ==========================================
-// COMMAND REGISTRATION
-// ==========================================
-
 let reminderTimerStarted = false
 
 export function registerCommands(bot) {
@@ -642,7 +562,7 @@ export function registerCommands(bot) {
     await saveReminders(reminders)
 
     await ctx.reply(
-      "🔕 Хорошо, больше не будем отправлять напоминания о вступлении в GOLD TRADE.",
+      "🔕 Напоминания отключены.",
       { reply_markup: backMenu() }
     )
   })
@@ -662,9 +582,7 @@ export function registerCommands(bot) {
     await saveApplications(applications)
     await stopReminder(userId, "application_cancelled")
 
-    await ctx.reply(
-      "Заявка отменена. Если захочешь вступить, сможешь подать её снова через главное меню."
-    )
+    await ctx.reply("Заявка отменена. Ты можешь подать новую через главное меню.")
   })
 
   bot.command("resend", async (ctx) => {
@@ -699,38 +617,28 @@ ${message}
     )
   })
 
-  // Save users who interact with the bot in private chat.
   bot.use(async (ctx, next) => {
-    if (
-      ctx.chat?.type === "private" &&
-      ctx.from &&
-      ctx.from.id !== ADMIN_ID
-    ) {
+    if (ctx.chat?.type === "private" && ctx.from && ctx.from.id !== ADMIN_ID) {
       try {
         await registerUser(ctx.from)
       } catch (error) {
-        console.error(
-          "[GOLD TRADE] Ошибка сохранения пользователя:",
-          error
-        )
+        console.error("[GOLD TRADE] Ошибка сохранения пользователя:", error)
       }
     }
 
     await next()
   })
 
-  // Receive Pocket Option ID.
   bot.on("message:text", async (ctx) => {
     if (ctx.chat.type !== "private") return
 
     const text = ctx.message.text.trim()
 
-    if (text.startsWith("/")) return
-    if (ctx.from.id === ADMIN_ID) return
+    if (text.startsWith("/") || ctx.from.id === ADMIN_ID) return
 
     if (!/^\d{4,20}$/.test(text)) {
       return ctx.reply(
-        "Отправь только числовой Pocket Option ID. Пароли, коды подтверждения и другие личные данные не нужны."
+        "Отправь только числовой Pocket Option ID. Пароли и коды подтверждения не нужны."
       )
     }
 
@@ -779,29 +687,18 @@ ${message}
       )
 
       await ctx.reply(
-        `✅ ЗАЯВКА ПРИНЯТА!
-
-Твой Pocket Option ID получен. Администратор вручную проверит регистрацию и пополнение.
-
-Ожидай уведомления о результате.`,
+        "✅ Заявка принята! Администратор вручную проверит регистрацию и пополнение. Ожидай уведомления.",
         { reply_markup: backMenu() }
       )
     } catch (error) {
       console.error("[GOLD TRADE] Ошибка заявки:", error)
-
-      await ctx.reply(
-        "Заявка сохранена, но уведомление администратору не отправлено. Попробуй позже или свяжись с поддержкой."
-      )
+      await ctx.reply("Заявка сохранена, но уведомление администратору не отправлено. Обратись в поддержку.")
     }
   })
 
-  // Approve application.
   bot.callbackQuery(/^approve:(\d+)$/, async (ctx) => {
     if (ctx.from.id !== ADMIN_ID) {
-      return ctx.answerCallbackQuery({
-        text: "Нет доступа.",
-        show_alert: true
-      })
+      return ctx.answerCallbackQuery({ text: "Нет доступа.", show_alert: true })
     }
 
     const userId = ctx.match[1]
@@ -809,10 +706,7 @@ ${message}
     const application = applications[userId]
 
     if (!application || application.status !== "pending") {
-      return ctx.answerCallbackQuery({
-        text: "Заявка уже обработана или не найдена.",
-        show_alert: true
-      })
+      return ctx.answerCallbackQuery({ text: "Заявка уже обработана или не найдена.", show_alert: true })
     }
 
     try {
@@ -820,17 +714,13 @@ ${message}
 
       application.status = "approved"
       application.approvedAt = new Date().toISOString()
-
       Object.assign(application, invitations)
 
       await saveApplications(applications)
       await stopReminder(userId, "application_approved")
       await sendInvitations(ctx.api, userId, invitations)
 
-      await ctx.answerCallbackQuery({
-        text: "Заявка одобрена!"
-      })
-
+      await ctx.answerCallbackQuery({ text: "Заявка одобрена!" })
       await ctx.editMessageText(
         `✅ ЗАЯВКА ОДОБРЕНА
 
@@ -841,7 +731,6 @@ Pocket Option ID: ${application.poId}
       )
     } catch (error) {
       console.error("[GOLD TRADE] Ошибка одобрения:", error)
-
       await ctx.answerCallbackQuery({
         text: "Ошибка выдачи приглашений. Проверь права бота.",
         show_alert: true
@@ -849,13 +738,9 @@ Pocket Option ID: ${application.poId}
     }
   })
 
-  // Reject application.
   bot.callbackQuery(/^reject:(\d+)$/, async (ctx) => {
     if (ctx.from.id !== ADMIN_ID) {
-      return ctx.answerCallbackQuery({
-        text: "Нет доступа.",
-        show_alert: true
-      })
+      return ctx.answerCallbackQuery({ text: "Нет доступа.", show_alert: true })
     }
 
     const userId = ctx.match[1]
@@ -863,10 +748,7 @@ Pocket Option ID: ${application.poId}
     const application = applications[userId]
 
     if (!application || application.status !== "pending") {
-      return ctx.answerCallbackQuery({
-        text: "Заявка уже обработана или не найдена.",
-        show_alert: true
-      })
+      return ctx.answerCallbackQuery({ text: "Заявка уже обработана или не найдена.", show_alert: true })
     }
 
     application.status = "rejected"
@@ -878,23 +760,17 @@ Pocket Option ID: ${application.poId}
     try {
       await ctx.api.sendMessage(
         Number(userId),
-        "❌ Твоя заявка отклонена.\n\nЕсли считаешь, что произошла ошибка, свяжись с администратором проекта.",
+        "❌ Твоя заявка отклонена. Если считаешь, что произошла ошибка, свяжись с администратором.",
         {
           reply_markup: new InlineKeyboard()
             .url("💬 СВЯЗАТЬСЯ С АДМИНИСТРАТОРОМ", SUPPORT_URL)
         }
       )
     } catch (error) {
-      console.error(
-        "[GOLD TRADE] Ошибка уведомления об отказе:",
-        error
-      )
+      console.error("[GOLD TRADE] Ошибка уведомления об отказе:", error)
     }
 
-    await ctx.answerCallbackQuery({
-      text: "Заявка отклонена."
-    })
-
+    await ctx.answerCallbackQuery({ text: "Заявка отклонена." })
     await ctx.editMessageText(
       `❌ ЗАЯВКА ОТКЛОНЕНА
 
@@ -909,31 +785,20 @@ Pocket Option ID: ${application.poId}`
     const application = applications[userId]
 
     if (!application || application.status !== "approved") {
-      return ctx.reply(
-        "Повторная выдача доступна только после одобрения заявки."
-      )
+      return ctx.reply("Повторная выдача доступна только после одобрения заявки.")
     }
 
     try {
       const invitations = await createInvitations(ctx.api)
-
       Object.assign(application, invitations)
-
       await saveApplications(applications)
       await sendInvitations(ctx.api, userId, invitations)
     } catch (error) {
-      console.error(
-        "[GOLD TRADE] Ошибка повторной выдачи:",
-        error
-      )
-
-      await ctx.reply(
-        "Не удалось создать приглашения. Обратись к администратору."
-      )
+      console.error("[GOLD TRADE] Ошибка повторной выдачи:", error)
+      await ctx.reply("Не удалось создать приглашения. Обратись к администратору.")
     }
   }
 
-  // Navigation callbacks.
   bot.callbackQuery("home", async (ctx) => {
     await ctx.answerCallbackQuery()
     await showWelcome(ctx)
@@ -969,11 +834,7 @@ Pocket Option ID: ${application.poId}`
     await startReminder(ctx.from.id)
 
     await ctx.reply(
-      `📌 СЛЕДУЮЩИЙ ШАГ
-
-После регистрации и пополнения отправь сюда свой числовой Pocket Option ID.
-
-Администратор проверит заявку вручную. Не отправляй пароли, коды подтверждения или данные банковской карты.`,
+      "📌 После регистрации и пополнения отправь следующим сообщением свой числовой Pocket Option ID. Не отправляй пароли или платёжные данные.",
       {
         reply_markup: new InlineKeyboard()
           .text("✅ УЖЕ ЗАРЕГИСТРИРОВАЛСЯ", "already_registered")
@@ -987,21 +848,14 @@ Pocket Option ID: ${application.poId}`
 
   bot.callbackQuery("already_registered", async (ctx) => {
     await ctx.answerCallbackQuery()
-
     await ctx.reply(
-      `✅ Отлично!
-
-Отправь следующим сообщением свой числовой Pocket Option ID (4–20 цифр).
-
-Не отправляй пароль, коды подтверждения или платёжные данные.`,
+      "Отправь следующим сообщением свой числовой Pocket Option ID (4–20 цифр). Не отправляй пароль, коды подтверждения или платёжные данные.",
       { reply_markup: backMenu() }
     )
   })
 
   bot.callbackQuery("stop_reminders", async (ctx) => {
-    await ctx.answerCallbackQuery({
-      text: "Напоминания отключены."
-    })
+    await ctx.answerCallbackQuery({ text: "Напоминания отключены." })
 
     const reminders = await loadReminders()
     const id = String(ctx.from.id)
@@ -1015,11 +869,9 @@ Pocket Option ID: ${application.poId}`
     }
 
     await saveReminders(reminders)
-
-    await ctx.reply(
-      "🔕 Готово. Больше не будем отправлять напоминания о вступлении.",
-      { reply_markup: backMenu() }
-    )
+    await ctx.reply("🔕 Больше не будем отправлять напоминания.", {
+      reply_markup: backMenu()
+    })
   })
 
   bot.callbackQuery("academy", async (ctx) => {
@@ -1030,9 +882,7 @@ Pocket Option ID: ${application.poId}`
 
     if (application?.status === "approved") {
       return ctx.reply(
-        `🎓 ACADEMY GOLD TRADE
-
-Твой доступ одобрен. Если приглашение потерялось или истекло, запроси новые ссылки через раздел «Моя заявка».`,
+        "🎓 Твой доступ одобрен. Если приглашение потерялось, запроси новые ссылки в разделе «Моя заявка».",
         {
           reply_markup: new InlineKeyboard()
             .text("📌 МОЯ ЗАЯВКА", "status")
@@ -1043,11 +893,7 @@ Pocket Option ID: ${application.poId}`
     }
 
     await ctx.reply(
-      `🎓 ACADEMY GOLD TRADE
-
-Обучающие материалы, основы торговли, разборы и развитие практических навыков.
-
-Доступ к закрытой академии предоставляется после одобрения заявки.`,
+      "🎓 ACADEMY GOLD TRADE — обучающие материалы и разборы. Доступ предоставляется после одобрения заявки.",
       {
         reply_markup: new InlineKeyboard()
           .text("👑 ВСТУПИТЬ В КОМАНДУ", "join")
@@ -1067,28 +913,19 @@ Pocket Option ID: ${application.poId}`
     await showSupport(ctx)
   })
 
-  // Admin broadcast confirmation.
   bot.callbackQuery("broadcast_confirm", async (ctx) => {
     if (ctx.from.id !== ADMIN_ID) {
-      return ctx.answerCallbackQuery({
-        text: "Нет доступа.",
-        show_alert: true
-      })
+      return ctx.answerCallbackQuery({ text: "Нет доступа.", show_alert: true })
     }
 
     if (!pendingBroadcast) {
-      return ctx.answerCallbackQuery({
-        text: "Нет подготовленной рассылки.",
-        show_alert: true
-      })
+      return ctx.answerCallbackQuery({ text: "Нет подготовленной рассылки.", show_alert: true })
     }
 
     const message = pendingBroadcast
     pendingBroadcast = null
 
-    await ctx.answerCallbackQuery({
-      text: "Рассылка запущена."
-    })
+    await ctx.answerCallbackQuery({ text: "Рассылка запущена." })
 
     const users = await loadUsers()
     let sent = 0
@@ -1098,60 +935,36 @@ Pocket Option ID: ${application.poId}`
       try {
         await ctx.api.sendMessage(Number(userId), message)
         sent += 1
-
         await new Promise((resolve) => setTimeout(resolve, 50))
       } catch (error) {
         failed += 1
-
-        console.error(
-          `[GOLD TRADE] Ошибка рассылки пользователю ${userId}:`,
-          error?.description || error
-        )
+        console.error(`[GOLD TRADE] Ошибка рассылки ${userId}:`, error)
       }
     }
 
-    await ctx.reply(
-      `📣 РАССЫЛКА ЗАВЕРШЕНА
-
-Успешно отправлено: ${sent}
-Не доставлено: ${failed}`
-    )
+    await ctx.reply(`📣 РАССЫЛКА ЗАВЕРШЕНА\n\nУспешно: ${sent}\nНе доставлено: ${failed}`)
   })
 
   bot.callbackQuery("broadcast_cancel", async (ctx) => {
     if (ctx.from.id !== ADMIN_ID) {
-      return ctx.answerCallbackQuery({
-        text: "Нет доступа.",
-        show_alert: true
-      })
+      return ctx.answerCallbackQuery({ text: "Нет доступа.", show_alert: true })
     }
 
     pendingBroadcast = null
-
-    await ctx.answerCallbackQuery({
-      text: "Рассылка отменена."
-    })
-
+    await ctx.answerCallbackQuery({ text: "Рассылка отменена." })
     await ctx.editMessageText("❌ Рассылка отменена.")
   })
 
-  // One reminder worker per bot process.
   if (!reminderTimerStarted) {
     reminderTimerStarted = true
 
     processDueReminders(bot).catch((error) =>
-      console.error(
-        "[GOLD TRADE] Ошибка проверки напоминаний:",
-        error
-      )
+      console.error("[GOLD TRADE] Ошибка проверки напоминаний:", error)
     )
 
     setInterval(() => {
       processDueReminders(bot).catch((error) =>
-        console.error(
-          "[GOLD TRADE] Ошибка проверки напоминаний:",
-          error
-        )
+        console.error("[GOLD TRADE] Ошибка проверки напоминаний:", error)
       )
     }, 60_000)
   }
